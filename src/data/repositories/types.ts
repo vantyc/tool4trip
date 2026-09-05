@@ -5,7 +5,9 @@ import type {
   DocumentMeta,
   ItineraryItem,
   Note,
+  PackageImport,
   Reminder,
+  TravelOption,
   Trip,
 } from '../../domain/types'
 
@@ -64,6 +66,21 @@ export interface NoteRepository {
   delete(id: string): Promise<void>
 }
 
+export interface TravelOptionRepository {
+  listByTrip(tripId: string): Promise<TravelOption[]>
+  getById(id: string): Promise<TravelOption | undefined>
+  getByPackageId(packageId: string): Promise<TravelOption[]>
+  put(option: TravelOption): Promise<void>
+  delete(id: string): Promise<void>
+}
+
+export interface PackageImportRepository {
+  getById(id: string): Promise<PackageImport | undefined>
+  listByTrip(tripId: string): Promise<PackageImport[]>
+  put(record: PackageImport): Promise<void>
+  delete(id: string): Promise<void>
+}
+
 export interface Repositories {
   trips: TripRepository
   bookings: BookingRepository
@@ -72,4 +89,6 @@ export interface Repositories {
   documents: DocumentRepository
   checklist: ChecklistRepository
   notes: NoteRepository
+  travelOptions: TravelOptionRepository
+  packageImports: PackageImportRepository
 }

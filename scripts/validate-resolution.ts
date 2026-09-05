@@ -1,6 +1,7 @@
 import { validateResolutionInvariants } from '../src/seed/validateResolution.ts'
 import { validateSummaryInvariants } from '../src/seed/validateSummary.ts'
 import { validateDocumentInvariants } from '../src/seed/validateDocuments.ts'
+import { validateTripPackageInvariants } from './validate-trip-package.ts'
 import { validatePwaInvariants } from './validate-pwa.ts'
 
 function report(
@@ -21,9 +22,19 @@ function report(
 const okResolution = report('Resolution', validateResolutionInvariants())
 const okSummary = report('Summary', validateSummaryInvariants())
 const okDocuments = report('Documents', await validateDocumentInvariants())
+const okTripPackage = report(
+  'TripPackage',
+  await validateTripPackageInvariants(),
+)
 const okPwa = report('PWA', validatePwaInvariants())
 
-if (!okResolution || !okSummary || !okDocuments || !okPwa) {
+if (
+  !okResolution ||
+  !okSummary ||
+  !okDocuments ||
+  !okTripPackage ||
+  !okPwa
+) {
   console.error('\nValidation failed')
   process.exit(1)
 }

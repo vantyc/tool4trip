@@ -6,7 +6,9 @@ import type {
   DocumentMeta,
   ItineraryItem,
   Note,
+  PackageImport,
   Reminder,
+  TravelOption,
   Trip,
 } from '../domain/types'
 
@@ -27,11 +29,13 @@ export class ViajesDatabase extends Dexie {
   documentBlobs!: EntityTable<DocumentBlobRecord, 'id'>
   checklistItems!: EntityTable<ChecklistItem, 'id'>
   notes!: EntityTable<Note, 'id'>
+  travelOptions!: EntityTable<TravelOption, 'id'>
+  packageImports!: EntityTable<PackageImport, 'id'>
 
   constructor() {
     super('viajes_db')
 
-    // v1 — initial MVP schema. Bump version + add upgrade() for future changes.
+    // v1 — initial MVP schema.
     this.version(1).stores({
       trips: 'id, status, startDate, updatedAt',
       bookings: 'id, tripId, type, status, startAt, [tripId+startAt]',
@@ -43,6 +47,21 @@ export class ViajesDatabase extends Dexie {
       checklistItems: 'id, tripId, status, sortOrder, [tripId+status]',
       notes: 'id, tripId, updatedAt',
     })
+
+    // v2 — researched TravelOptions + package import dedupe (additive; no data wipe).
+    this.version(2).stores({
+      trips: 'id, status, startDate, updatedAt',
+      bookings: 'id, tripId, type, status, startAt, [tripId+startAt]',
+      itineraryItems: 'id, tripId, bookingId, importance',
+      reminders: 'id, tripId, itineraryItemId',
+      documents: 'id, tripId, bookingId, itineraryItemId, type, [tripId+type]',
+      documentBlobs: 'id, tripId',
+      checklistItems: 'id, tripId, status, sortOrder, [tripId+status]',
+      notes: 'id, tripId, updatedAt',
+      travelOptions:
+        'id, tripId, type, status, packageId, bookingId, [tripId+type], [tripId+status]',
+      packageImports: 'id, tripId, importedAt',
+    })
   }
 }
 
@@ -50,4 +69,4 @@ export const db = new ViajesDatabase()
 
 /** DB identity used in PWA docs/tests — must stay stable. */
 export const IDB_DATABASE_NAME = 'viajes_db'
-export const IDB_SCHEMA_VERSION = 1
+export const IDB_SCHEMA_VERSION = 2

@@ -53,6 +53,7 @@ export function TripLayout() {
         <NavLink end to={`/trips/${tripId}`}>
           Resumen
         </NavLink>
+        <NavLink to={`/trips/${tripId}/options`}>Opciones</NavLink>
         <NavLink to={`/trips/${tripId}/bookings`}>Reservas</NavLink>
         <NavLink to={`/trips/${tripId}/itinerary`}>Itinerario</NavLink>
         <NavLink to={`/trips/${tripId}/checklist`}>Checklist</NavLink>

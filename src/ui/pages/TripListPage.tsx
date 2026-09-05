@@ -47,6 +47,9 @@ export function TripListPage() {
         <button type="button" onClick={() => void handleSeed()} disabled={busy}>
           {busy ? 'Cargando…' : 'Cargar seed San Miguel (FICTICIO)'}
         </button>
+        <Link to="/import" className="sum-action">
+          Importar investigación
+        </Link>
       </div>
 
       {message && <p className="flash">{message}</p>}

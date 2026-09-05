@@ -1,6 +1,10 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  IDB_DATABASE_NAME,
+  IDB_SCHEMA_VERSION,
+} from '../src/data/db.ts'
 import { APP_BASE } from '../vite.config.ts'
 
 export interface PwaCheck {
@@ -8,9 +12,6 @@ export interface PwaCheck {
   pass: boolean
   detail: string
 }
-
-const IDB_DATABASE_NAME = 'viajes_db'
-const IDB_SCHEMA_VERSION = 1
 
 /**
  * PWA / base-path / IndexedDB stability checks.

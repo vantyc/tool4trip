@@ -19,6 +19,10 @@ import {
   guessDocumentType,
 } from './documents'
 import { newId, nowIso, touchTimestamps } from './ids'
+import {
+  createPackageImportService,
+  createTravelOptionService,
+} from './packageImport'
 import { humanStorageError, isQuotaExceededError } from './storageStats'
 import { createSummaryService } from './summaryService'
 
@@ -300,6 +304,8 @@ export function createServices(repos: Repositories) {
     documents: createDocumentService(repos),
     checklist: createChecklistService(repos),
     notes: createNoteService(repos),
+    travelOptions: createTravelOptionService(repos),
+    packages: createPackageImportService(repos),
     summary: createSummaryService(repos),
     newId,
   }

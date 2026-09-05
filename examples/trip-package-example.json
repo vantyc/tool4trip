@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "packageId": "demo-sma-research-2026-09",
+  "trip": {
+    "id": "demo-sma-research-trip",
+    "title": "San Miguel el Alto [FICTICIO / DEMO investigación]",
+    "destination": "San Miguel el Alto, Jalisco, México",
+    "startDate": "2026-09-25",
+    "endDate": "2026-10-01",
+    "timezone": "America/Mexico_City",
+    "goals": [
+      "fiestas patronales",
+      "socializar",
+      "trabajo remoto"
+    ],
+    "status": "planned",
+    "notes": "[FICTICIO / DEMO] Paquete de ejemplo para probar importación. No son precios ni horarios reales."
+  },
+  "travelOptions": [
+    {
+      "externalId": "flight-a",
+      "type": "flight",
+      "status": "researched",
+      "title": "[FICTICIO] Vuelo MEX → GDL opción A",
+      "provider": "DEMO Airlines A",
+      "startAt": "2026-09-25T07:30:00-06:00",
+      "endAt": "2026-09-25T08:45:00-06:00",
+      "origin": "MEX — CDMX",
+      "destination": "GDL — Guadalajara",
+      "priceObserved": 1850,
+      "currency": "MXN",
+      "sourceUrl": "https://example.com/demo/flight-a",
+      "checkedAt": "2026-09-05T17:30:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor",
+      "notes": "[FICTICIO] Ejemplo de cotización investigada."
+    },
+    {
+      "externalId": "flight-b",
+      "type": "flight",
+      "status": "shortlisted",
+      "title": "[FICTICIO] Vuelo MEX → GDL opción B",
+      "provider": "DEMO Airlines B",
+      "startAt": "2026-09-25T11:10:00-06:00",
+      "endAt": "2026-09-25T12:25:00-06:00",
+      "origin": "MEX — CDMX",
+      "destination": "GDL — Guadalajara",
+      "priceObserved": 2100,
+      "currency": "MXN",
+      "sourceUrl": "https://example.com/demo/flight-b",
+      "checkedAt": "2026-09-05T17:35:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor",
+      "notes": "[FICTICIO] Precio estimado, no verificado en checkout."
+    },
+    {
+      "externalId": "stay-a",
+      "type": "lodging",
+      "status": "researched",
+      "title": "[FICTICIO] Hospedaje centro — opción A",
+      "provider": "DEMO Stay Centro",
+      "startAt": "2026-09-25T15:00:00-06:00",
+      "endAt": "2026-10-01T11:00:00-06:00",
+      "address": "Centro, San Miguel el Alto [FICTICIO]",
+      "priceObserved": 4200,
+      "currency": "MXN",
+      "sourceUrl": "https://example.com/demo/stay-a",
+      "checkedAt": "2026-09-05T17:40:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor"
+    },
+    {
+      "externalId": "stay-b",
+      "type": "lodging",
+      "status": "researched",
+      "title": "[FICTICIO] Hospedaje quieto — opción B",
+      "provider": "DEMO Stay Quiet",
+      "startAt": "2026-09-25T15:00:00-06:00",
+      "endAt": "2026-10-01T11:00:00-06:00",
+      "address": "Orilla del pueblo [FICTICIO]",
+      "priceObserved": 3800,
+      "currency": "MXN",
+      "sourceUrl": "https://example.com/demo/stay-b",
+      "checkedAt": "2026-09-05T17:42:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor"
+    },
+    {
+      "externalId": "bus-a",
+      "type": "bus",
+      "status": "researched",
+      "title": "[FICTICIO] Autobús GDL → San Miguel opción A",
+      "provider": "DEMO Bus Lines",
+      "startAt": "2026-09-25T13:00:00-06:00",
+      "endAt": "2026-09-25T16:00:00-06:00",
+      "origin": "Central Nueva, Guadalajara",
+      "destination": "San Miguel el Alto",
+      "priceObserved": 280,
+      "currency": "MXN",
+      "sourceUrl": "https://example.com/demo/bus-a",
+      "checkedAt": "2026-09-05T17:45:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor"
+    },
+    {
+      "externalId": "bus-b",
+      "type": "bus",
+      "status": "selected",
+      "title": "[FICTICIO] Autobús GDL → San Miguel opción B (más tarde)",
+      "provider": "DEMO Bus Lines",
+      "startAt": "2026-09-25T16:30:00-06:00",
+      "endAt": "2026-09-25T19:30:00-06:00",
+      "origin": "Central Nueva, Guadalajara",
+      "destination": "San Miguel el Alto",
+      "priceObserved": 260,
+      "currency": "MXN",
+      "sourceUrl": "https://example.com/demo/bus-b",
+      "checkedAt": "2026-09-05T17:46:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor"
+    },
+    {
+      "externalId": "act-plaza",
+      "type": "activity",
+      "status": "researched",
+      "title": "[FICTICIO] Caminata por la plaza",
+      "description": "Paseo libre DEMO — sin costo de entrada.",
+      "startAt": "2026-09-26T18:00:00-06:00",
+      "address": "Plaza principal [FICTICIO]",
+      "priceObserved": 0,
+      "currency": "MXN",
+      "sourceUrl": "https://example.com/demo/plaza",
+      "checkedAt": "2026-09-05T17:50:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor"
+    },
+    {
+      "externalId": "act-event",
+      "type": "event",
+      "status": "shortlisted",
+      "title": "[FICTICIO] Evento patronal — ejemplo",
+      "provider": "DEMO Cultura Local",
+      "startAt": "2026-09-27T19:00:00-06:00",
+      "endAt": "2026-09-27T22:00:00-06:00",
+      "address": "Atrio / plaza [FICTICIO]",
+      "priceObserved": 0,
+      "currency": "MXN",
+      "sourceUrl": "https://example.com/demo/event",
+      "checkedAt": "2026-09-05T17:52:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor",
+      "notes": "[FICTICIO] Horario aproximado; confirmar en pueblo."
+    }
+  ],
+  "itineraryItems": [
+    {
+      "externalId": "itin-arrive",
+      "title": "[FICTICIO] Llegada y acomodo",
+      "startAt": "2026-09-25T16:30:00-06:00",
+      "importance": "recommended",
+      "notes": "Ítem libre del paquete DEMO — no vinculado a Booking."
+    }
+  ],
+  "checklistItems": [
+    {
+      "externalId": "chk-compare-flights",
+      "label": "[FICTICIO] Comparar dos opciones de vuelo",
+      "sortOrder": 0
+    },
+    {
+      "externalId": "chk-confirm-bus",
+      "label": "[FICTICIO] Confirmar horario de autobús el día anterior",
+      "sortOrder": 1
+    },
+    {
+      "externalId": "chk-cash",
+      "label": "[FICTICIO] Llevar efectivo para transporte local",
+      "sortOrder": 2
+    }
+  ],
+  "notes": [
+    {
+      "externalId": "note-context",
+      "title": "Contexto DEMO",
+      "body": "[FICTICIO / DEMO] Este paquete existe solo para probar importación y UX de opciones investigadas. No uses estos datos como si fueran reales."
+    }
+  ]
+}

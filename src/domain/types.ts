@@ -214,6 +214,78 @@ export interface Note {
   syncStatus: SyncStatus
 }
 
+/** Researched option — NOT a confirmed Booking. */
+export type TravelOptionType =
+  | 'flight'
+  | 'lodging'
+  | 'bus'
+  | 'train'
+  | 'transfer'
+  | 'car_rental'
+  | 'restaurant'
+  | 'activity'
+  | 'event'
+  | 'other'
+
+export type TravelOptionStatus =
+  | 'researched'
+  | 'shortlisted'
+  | 'selected'
+  | 'booked'
+  | 'rejected'
+
+export type VerificationStatus = 'verified' | 'estimated' | 'unverified'
+
+export type TravelOptionSourceType = 'cursor' | 'manual' | 'imported' | 'other'
+
+/**
+ * Lightweight researched option. Never treat researched/shortlisted/selected
+ * as a confirmed Booking — only status `booked` (+ bookingId) means converted.
+ */
+export interface TravelOption {
+  id: string
+  tripId: string
+  type: TravelOptionType
+  status: TravelOptionStatus
+  title: string
+  provider?: string
+  description?: string
+  startAt?: string
+  endAt?: string
+  origin?: string
+  destination?: string
+  address?: string
+  phone?: string
+  priceObserved?: number
+  currency?: string
+  sourceUrl?: string
+  /** When the web source was last checked (ISO with offset preferred). */
+  checkedAt?: string
+  verificationStatus?: VerificationStatus
+  sourceType: TravelOptionSourceType
+  notes?: string
+  /** Stable id from the research package (dedupe / re-import). */
+  externalId?: string
+  /** TripPackage.packageId that created this option. */
+  packageId?: string
+  /** Set when converted to a managed Booking. */
+  bookingId?: string
+  createdAt: string
+  updatedAt: string
+  syncStatus: SyncStatus
+}
+
+/** Record of an imported TripPackage — used for duplicate detection. */
+export interface PackageImport {
+  /** Same as TripPackage.packageId */
+  id: string
+  tripId: string
+  title: string
+  importedAt: string
+  optionCount: number
+  schemaVersion: number
+}
+
 /** Application-layer view after joining Booking → ItineraryItem. */
 export interface ResolvedItineraryItem {
   item: ItineraryItem

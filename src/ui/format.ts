@@ -34,6 +34,51 @@ export function formatBookingStatus(status: string): string {
   return map[status] ?? status
 }
 
+export function formatTravelOptionStatus(status: string): string {
+  const map: Record<string, string> = {
+    researched: 'Investigada',
+    shortlisted: 'Shortlist',
+    selected: 'Seleccionada',
+    booked: 'Convertida a reserva',
+    rejected: 'Rechazada',
+  }
+  return map[status] ?? status
+}
+
+export function formatVerificationStatus(status?: string): string {
+  const map: Record<string, string> = {
+    verified: 'Verificada',
+    estimated: 'Estimada',
+    unverified: 'Sin verificar',
+  }
+  return status ? (map[status] ?? status) : '—'
+}
+
+export function formatTravelOptionType(type: string): string {
+  const map: Record<string, string> = {
+    flight: 'Vuelo',
+    lodging: 'Hospedaje',
+    bus: 'Autobús',
+    train: 'Tren',
+    transfer: 'Traslado',
+    car_rental: 'Renta de auto',
+    restaurant: 'Restaurante',
+    activity: 'Actividad',
+    event: 'Evento',
+    other: 'Otro',
+  }
+  return map[type] ?? type
+}
+
+export function formatPriceObserved(
+  price?: number,
+  currency?: string,
+): string {
+  if (price === undefined) return '—'
+  const amount = Number.isInteger(price) ? String(price) : price.toFixed(2)
+  return currency ? `${amount} ${currency}` : amount
+}
+
 export function groupByDate<T extends { startAt?: string }>(
   items: T[],
 ): { date: string; items: T[] }[] {

@@ -27,3 +27,6 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Personal research TripPackages (real trips; keep local)
+imports/

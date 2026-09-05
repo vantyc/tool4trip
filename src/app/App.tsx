@@ -5,9 +5,11 @@ import { ConnectionIndicator } from '../ui/ConnectionIndicator'
 import { BookingsPage } from '../ui/pages/BookingsPage'
 import { ChecklistPage } from '../ui/pages/ChecklistPage'
 import { DocumentsPage } from '../ui/pages/DocumentsPage'
+import { ImportResearchPage } from '../ui/pages/ImportResearchPage'
 import { ItemDetailPage } from '../ui/pages/ItemDetailPage'
 import { ItineraryPage } from '../ui/pages/ItineraryPage'
 import { NotesPage } from '../ui/pages/NotesPage'
+import { OptionsPage } from '../ui/pages/OptionsPage'
 import { TripLayout } from '../ui/pages/TripLayout'
 import { TripListPage } from '../ui/pages/TripListPage'
 import { TripOverviewPage } from '../ui/pages/TripOverviewPage'
@@ -65,8 +67,10 @@ export function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<TripListPage />} />
+          <Route path="/import" element={<ImportResearchPage />} />
           <Route path="/trips/:tripId" element={<TripLayout />}>
             <Route index element={<TripOverviewPage />} />
+            <Route path="options" element={<OptionsPage />} />
             <Route path="bookings" element={<BookingsPage />} />
             <Route path="itinerary" element={<ItineraryPage />} />
             <Route path="checklist" element={<ChecklistPage />} />
