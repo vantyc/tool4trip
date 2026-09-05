@@ -32,6 +32,10 @@ Traefik prioriza el path más largo: `/travel` gana sobre `/`. No hay redirect H
 ```
 https://tool4speak.com/        → Ingress tool4speak  [SIN CAMBIOS]
 https://tool4speak.com/travel/ → Ingress viajes-web
+
+Nota PWA: Tool4Speak registra un SW con `scope: /`. Su `NavigationRoute`
+debe denylistear `/travel` (`navigateFallbackDenylist`); si no, Chrome
+sirve el `index.html` de Tool4Speak en `/travel` sin llegar al Ingress.
                                       ├─ Middleware basicAuth
                                       ├─ TLS Secret viajes-tls (Certificate CR)
                                       └─ Service/Deployment viajes-web
