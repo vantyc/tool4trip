@@ -1,0 +1,33 @@
+# PROPOSED — TLS renovable vía cert-manager (NO copiar tool4speak-tls).
+#
+# Emite un certificado Let's Encrypt propio en namespace viajes.
+# Secret resultante: viajes/viajes-tls
+#
+# ClusterIssuer observado: letsencrypt-prod
+#   solvers.http01.ingress.class: traefik
+#
+# HTTP-01: cert-manager crea un Ingress temporal
+#   Host: tool4speak.com (y/o www)
+#   Path: /.well-known/acme-challenge/<token>
+# Ese path es más específico que el Prefix "/" de ToolForSpeak, así que
+# Traefik lo prioriza. Evidencia: tool4speak-tls ya se emitió así con el
+# catch-all "/" presente. No hay redirect HTTP→HTTPS global en Traefik.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: viajes-tls
+  namespace: viajes
+  labels:
+    app: viajes-web
+spec:
+  secretName: viajes-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+  dnsNames:
+    - tool4speak.com
+    - www.tool4speak.com
+  usages:
+    - digital signature
+    - key encipherment

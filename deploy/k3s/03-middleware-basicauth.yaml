@@ -1,0 +1,19 @@
+# PROPOSED — Middleware only. The Secret is created OUTSIDE git (see AUTH.md).
+#
+# Referenced from Ingress as:
+#   viajes-viajes-basicauth@kubernetescrd
+#
+# Requires Secret viajes-basic-auth in namespace viajes with key `users`
+# containing htpasswd lines (bcrypt via htpasswd -nbB).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: viajes-basicauth
+  namespace: viajes
+  labels:
+    app: viajes-web
+spec:
+  basicAuth:
+    secret: viajes-basic-auth
+    realm: Viajes
+    removeHeader: true

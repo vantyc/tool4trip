@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: viajes-web
+  namespace: viajes
+  labels:
+    app: viajes-web
+spec:
+  type: ClusterIP
+  selector:
+    app: viajes-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

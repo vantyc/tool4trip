@@ -1,0 +1,52 @@
+# PROPOSED — do not apply without approval.
+#
+# Routing:
+#   tool4speak.com/travel  → viajes-web (this Ingress)
+#   tool4speak.com/        → tool4speak (UNCHANGED, other namespace)
+#
+# Traefik (v3.6.7) prefers the longer path Prefix (/travel) over (/).
+# No StripPrefix: the image serves files under /travel/ to match Vite base.
+#
+# TLS: secret viajes-tls managed by Certificate viajes-tls (cert-manager).
+# Do NOT copy tool4speak-tls. Do NOT put cert-manager.io/cluster-issuer here
+# (the Certificate CR owns issuance/renewal to avoid duplicate owners).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: viajes-web
+  namespace: viajes
+  labels:
+    app: viajes-web
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # Protect only /travel/ — ToolForSpeak stays public.
+    traefik.ingress.kubernetes.io/router.middlewares: viajes-viajes-basicauth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4speak.com
+      http:
+        paths:
+          - path: /travel
+            pathType: Prefix
+            backend:
+              service:
+                name: viajes-web
+                port:
+                  number: 80
+    - host: www.tool4speak.com
+      http:
+        paths:
+          - path: /travel
+            pathType: Prefix
+            backend:
+              service:
+                name: viajes-web
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - tool4speak.com
+        - www.tool4speak.com
+      secretName: viajes-tls
