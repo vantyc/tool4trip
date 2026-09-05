@@ -1,0 +1,71 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f0e8;
+  --bg-accent: #e4ddd0;
+  --ink: #1a3a4a;
+  --ink-muted: #4a6570;
+  --line: #c8c0b0;
+  --ok: #2d6a4f;
+  --bad: #9b2226;
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --font-body: 'Segoe UI', 'Helvetica Neue', sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  min-height: 100dvh;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse 120% 80% at 10% -20%, #dfe8e4 0%, transparent 55%),
+    radial-gradient(ellipse 90% 60% at 100% 0%, #ebe4d6 0%, transparent 50%),
+    var(--bg);
+  line-height: 1.45;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Prefer :active / focus over hover-only affordances on touch devices */
+@media (hover: hover) {
+  a:hover,
+  button:hover {
+    filter: brightness(0.97);
+  }
+}
+
+button,
+a.sum-action,
+.sum-action {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+input,
+select,
+textarea,
+button {
+  font-size: 16px; /* avoid iOS zoom on focus */
+}
+
+code {
+  font-size: 0.9em;
+  background: var(--bg-accent);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+a {
+  color: var(--ink);
+}
