@@ -1,0 +1,355 @@
+{
+  "schemaVersion": 1,
+  "packageId": "sma-2026-research-20260905",
+  "revision": 3,
+  "generatedAt": "2026-09-05T18:20:00-06:00",
+  "trip": {
+    "id": "sma-2026-sep25-oct01",
+    "title": "San Miguel el Alto — fiestas sep 2026",
+    "destination": "San Miguel el Alto, Jalisco, México",
+    "startDate": "2026-09-25",
+    "endDate": "2026-10-01",
+    "timezone": "America/Mexico_City",
+    "goals": [
+      "fiestas patronales / ambiente de feria",
+      "conocer el pueblo con calma",
+      "socializar",
+      "gastronomía y tradiciones locales",
+      "trabajo remoto con Wi-Fi usable",
+      "excursiones opcionales a Arandas / Jalostotitlán solo si no interfieren"
+    ],
+    "status": "planned",
+    "notes": "Rev.3 filtrada (regla top-2): solo finalistas por decisión. Vuelos: 2 idas low-cost matutinas + 2 regresos. Hospedaje: 2 céntricos con Wi-Fi/baño. Transporte: 2 transfers + bus solo como referencia económica. Eventos: solo relevantes 25 sep–1 oct. NO se ha reservado nada."
+  },
+  "travelOptions": [
+    {
+      "externalId": "flight-out-volaris-search",
+      "type": "flight",
+      "status": "shortlisted",
+      "title": "Volaris directo MEX → GDL 25 sep 2026 (~06:00→07:18)",
+      "provider": "Volaris",
+      "description": "Google Flights (25 sep 2026) lista Volaris no-stop MEX 06:00 → GDL 07:18 (~1 h 18 m). Precio en GF: «Price unavailable» en esta consulta. Sitio Volaris sep-2026 sigue mostrando referencia mensual desde ~580 MXN (rango ~580–1182). Terminal: MEX (AICM). Preferible para maximizar día en SMA.",
+      "origin": "MEX — AICM Ciudad de México",
+      "destination": "GDL — Aeropuerto Guadalajara",
+      "priceObserved": 580,
+      "currency": "MXN",
+      "sourceUrl": "https://www.google.com/travel/flights?q=Flights%20to%20GDL%20from%20MEX%20on%202026-09-25%20oneway",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor",
+      "notes": "Opción ida #1 por precio estimado (~580 MXN ref.) + llegada temprana. Confirmar checkout/equipaje en volaris.com.",
+      "startAt": "2026-09-25T06:00:00-06:00",
+      "endAt": "2026-09-25T07:18:00-06:00"
+    },
+    {
+      "externalId": "flight-out-viva-route",
+      "type": "flight",
+      "status": "shortlisted",
+      "title": "Viva Aerobus directo MEX → GDL 25 sep 2026 (~06:00→07:16)",
+      "provider": "Viva Aerobus",
+      "description": "Google Flights (25 sep 2026): Viva no-stop MEX 06:00 → GDL 07:16 (~1 h 16 m). También NLU 06:00→07:11. Precio GF: unavailable en esta consulta.",
+      "origin": "MEX — AICM Ciudad de México",
+      "destination": "GDL — Aeropuerto Guadalajara",
+      "sourceUrl": "https://www.google.com/travel/flights?q=Flights%20to%20GDL%20from%20MEX%20on%202026-09-25%20oneway",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor",
+      "notes": "Una de las 2 opciones ida más baratas (low-cost matutino). Confirmar precio/equipaje en vivaaerobus.com. Comparar vs Volaris 06:00.",
+      "startAt": "2026-09-25T06:00:00-06:00",
+      "endAt": "2026-09-25T07:16:00-06:00"
+    },
+    {
+      "externalId": "flight-ret-volaris-search",
+      "type": "flight",
+      "status": "shortlisted",
+      "title": "Volaris directo GDL → MEX 1 oct 2026 (~14:22→15:45)",
+      "provider": "Volaris",
+      "description": "Google Flights (1 oct 2026): Volaris no-stop GDL 14:22 → MEX 15:45 (~1 h 23 m). Otras salidas Volaris listadas: 06:02, 08:22, 12:02, 18:37, 19:15, 21:22 (precios GF unavailable). Referencia mensual Volaris oct ~desde 664 MXN (sitio ruta).",
+      "origin": "GDL — Aeropuerto Guadalajara",
+      "destination": "MEX — AICM Ciudad de México",
+      "priceObserved": 664,
+      "currency": "MXN",
+      "sourceUrl": "https://www.google.com/travel/flights?q=Flights%20to%20MEX%20from%20GDL%20on%202026-10-01%20oneway",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor",
+      "notes": "Opción regreso #1 por precio estimado. Salir SMA ~11:00–11:30. Confirmar checkout.",
+      "startAt": "2026-10-01T14:22:00-06:00",
+      "endAt": "2026-10-01T15:45:00-06:00"
+    },
+    {
+      "externalId": "flight-ret-aeromexico-route",
+      "type": "flight",
+      "status": "shortlisted",
+      "title": "Aeroméxico directo GDL → MEX 1 oct 2026 (13:46→15:15)",
+      "provider": "Aeroméxico",
+      "description": "Google Flights (1 oct 2026): Aeroméxico no-stop GDL 13:46 → MEX 15:15 (~1 h 29 m), US$117. También 14:50→16:25 (US$124), 11:38→13:10 (US$117), 18:50→20:25 (US$117).",
+      "origin": "GDL — Aeropuerto Guadalajara",
+      "destination": "MEX — AICM Ciudad de México",
+      "sourceUrl": "https://www.google.com/travel/flights?q=Flights%20to%20MEX%20from%20GDL%20on%202026-10-01%20oneway",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor",
+      "notes": "Opción regreso #2: precio GF US$117 observado; buen buffer post-transfer. Más cara que Volaris estimado; confirmar carry-on.",
+      "startAt": "2026-10-01T13:46:00-06:00",
+      "endAt": "2026-10-01T15:15:00-06:00",
+      "priceObserved": 117,
+      "currency": "USD"
+    },
+    {
+      "externalId": "lodging-meson-cristeros",
+      "type": "lodging",
+      "status": "shortlisted",
+      "title": "Hotel Mesón de los Cristeros (centro)",
+      "provider": "Hotel Mesón de los Cristeros",
+      "description": "Francisco I. Madero #40, Centro. Ficha turismo municipal: red inalámbrica, sala de juntas, restaurante/bar, estacionamiento, tel. 347 788 2499/2504, gerencia@mesondeloscristeros.com. Agregadores 2026 siguen listando Wi-Fi gratis y desde ~US$81/noche, pero calendario pide elegir fechas — NO se obtuvo checkout de disponibilidad 25 sep–1 oct 2026.",
+      "startAt": "2026-09-25T15:00:00-06:00",
+      "endAt": "2026-10-01T12:00:00-06:00",
+      "address": "Francisco I. Madero #40, Col. Centro, 47140 San Miguel el Alto, Jal.",
+      "phone": "+52 347 788 2499 / 347 788 2504",
+      "priceObserved": 1500,
+      "currency": "MXN",
+      "sourceUrl": "https://www.sanmiguelelalto.gob.mx/turismo/opc/detalle/hotel-meson-de-los-cristeros",
+      "checkedAt": "2026-09-05T18:20:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor",
+      "notes": "Finalista #1 para trabajo remoto (sala de juntas + Wi-Fi anunciado + baño privado + centro). Wi-Fi NO verified — llamar speed test. Precio ~1500 MXN/noche estimado agregador."
+    },
+    {
+      "externalId": "lodging-hotel-san-miguel",
+      "type": "lodging",
+      "status": "researched",
+      "title": "Hotel San Miguel (centro / plaza)",
+      "provider": "Hotel San Miguel",
+      "description": "Genáro Alcalá #10, pasos de plaza. Ficha municipal: hotel familiar 2★, 12 hab., agua caliente, cable y red WIFI, 24 h. Tel. 347 788 2132. Disponibilidad 25 sep–1 oct 2026 NO verificada en checkout.",
+      "startAt": "2026-09-25T15:00:00-06:00",
+      "endAt": "2026-10-01T12:00:00-06:00",
+      "address": "Genáro Alcalá #10, San Miguel el Alto, Jal.",
+      "phone": "+52 347 788 2132",
+      "sourceUrl": "https://www.sanmiguelelalto.gob.mx/turismo/opc/detalle/hotel-san-miguel",
+      "checkedAt": "2026-09-05T18:20:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor",
+      "notes": "Finalista #2: mejor ubicación plaza + WIFI anunciado + hotel pequeño. Precio no publicado; probablemente más económico que Mesón — confirmar al llamar. Wi-Fi NO verified."
+    },
+    {
+      "externalId": "xfer-dmx-travel-gdl",
+      "type": "transfer",
+      "status": "shortlisted",
+      "title": "DMx Travel — traslado privado GDL (cotizar ciudad a ciudad)",
+      "provider": "DMx Travel",
+      "description": "Operador de traslados privados con presencia en Guadalajara: aeropuerto, precio fijo anunciado, sedán/SUV/van, reserva web. Incluye opción «Traslado ciudad a ciudad». San Miguel el Alto no aparece en destinos populares listados — solicitar cotización explícita GDL aeropuerto → SMA.",
+      "origin": "Aeropuerto Internacional de Guadalajara (GDL)",
+      "destination": "San Miguel el Alto (hotel)",
+      "sourceUrl": "https://dmxtravel.com/es/transporte-privado/guadalajara/",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor",
+      "notes": "Contactar vía formulario del sitio. Pedir precio cerrado ida (y vuelta 1 oct) con laptop/maleta."
+    },
+    {
+      "externalId": "xfer-private-gdl-sma",
+      "type": "transfer",
+      "status": "shortlisted",
+      "title": "Transfer privado GDL aeropuerto → San Miguel el Alto (cotizar)",
+      "provider": "Privado / taxi ejecutivo (reserva previa)",
+      "description": "Ruta carretera ~122–133 km / ~1 h 50–2 h. Prioridad vs bus. No hay tarifa pública fija GDL→SMA en listados de taxi aeropuerto (sí hay Tequila/Chapala). Cotizar con operadores de traslado privado y módulo taxi oficial GDL.",
+      "origin": "Aeropuerto Internacional de Guadalajara (GDL)",
+      "destination": "San Miguel el Alto (hotel)",
+      "priceObserved": 1800,
+      "currency": "MXN",
+      "sourceUrl": "https://taxienaeropuerto.com.mx/taxi-aeropuerto-guadalajara-tarifas/",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor",
+      "notes": "1800 MXN sigue siendo orden de magnitud (no cotización). Peajes Capufe GDL→SMA ~242 MXN estimados. Pedir 2–3 cotizaciones con laptop/maleta."
+    },
+    {
+      "externalId": "xfer-primera-plus-bus",
+      "type": "bus",
+      "status": "researched",
+      "title": "Autobús Primera Plus GDL ↔ SMA (referencia económica)",
+      "provider": "Primera Plus (Grupo Flecha Amarilla)",
+      "description": "Terminal SMA Hidalgo #2 (ficha Primera Plus). Duración típica ~2 h GDL↔SMA. Sin bus documentado desde terminal aérea: aeropuerto→Central + boleto. Agregador autobusesmexico.com.mx advierte servicio Primera Plus «temporalmente suspendido» en central SMA — CONTRASTAR en primeraplus.com.mx / 477 710 0060 antes de depender del bus.",
+      "origin": "Guadalajara (Central / Zapopan según corrida)",
+      "destination": "Central Autobuses San Miguel el Alto",
+      "address": "Terminal SMA: Hidalgo #2 esquina Morelos, Centro, CP 47140",
+      "phone": "+52 347 788 2180 (terminal SMA); call center +52 477 710 0060",
+      "priceObserved": 160,
+      "currency": "MXN",
+      "sourceUrl": "https://www.primeraplus.com.mx/es-MX/terminales/t-san-miguel-el-alto-san-miguel-el-alto",
+      "checkedAt": "2026-09-05T18:20:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor",
+      "notes": "REFERENCIA DE PRECIO (~160 MXN), no recomendación primaria. Sustancialmente más barato que transfer, pero suma aeropuerto→central + ~2 h + posible suspensión del servicio. Verificar en primeraplus.com.mx / 477 710 0060. Priorizar transfer cotizado."
+    },
+    {
+      "externalId": "event-expo-25-diego-herrera",
+      "type": "event",
+      "status": "shortlisted",
+      "title": "Expo 25 sep — Diego Herrera + La Décima Clave",
+      "provider": "Patronato Expo Ganadera San Miguel el Alto",
+      "description": "Según Semanario7días (programa Expo 2026): 25 de septiembre, show ecuestre de Diego Herrera junto con La Décima Clave. Tarifas reportadas 350 MXN general hasta 6,000 VIP. Hora exacta de inicio NO publicada en la nota.",
+      "startAt": "2026-09-25T18:00:00-06:00",
+      "priceObserved": 350,
+      "currency": "MXN",
+      "sourceUrl": "https://semanario7dias.com.mx/inicia-la-fiesta-ganadera-en-san-miguel-el-alto/",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "cursor",
+      "notes": "Buen plan de llegada/noche 25 sep si el horario cuadra con vuelo+transfer. Confirmar hora en Presidencia/Talabartería Fredy."
+    },
+    {
+      "externalId": "event-corrida-27",
+      "type": "event",
+      "status": "researched",
+      "title": "Feria Taurina — 1ª corrida (27 sep 2026, 16:30)",
+      "provider": "Casa Toreros / Plaza de Toros Carmelo Pérez",
+      "description": "Cartel feria taurina 2026: domingo 27 sep. Actutoro (25 ago 2026) detalla cartel mixto (Magdalena González; rejoneo André Gonçalvez; matadores El Chihuahua, Román Martínez, El Galo). Hora 16:30 confirmada en prensa local previa (Superchannel12). Venue: instalaciones tipo Catorce Roof Top / plaza Carmelo Pérez según fuentes.",
+      "startAt": "2026-09-27T16:30:00-06:00",
+      "address": "Plaza de Toros Carmelo Pérez, San Miguel el Alto",
+      "sourceUrl": "https://www.actutoro.fr/deux-corridas-mixtes-pour-la-foire-de-san-miguel-el-alto/",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "verified",
+      "sourceType": "cursor",
+      "notes": "Opcional. No es serenata. Contrastar puerta/venue el día previo."
+    },
+    {
+      "externalId": "event-corrida-29",
+      "type": "event",
+      "status": "shortlisted",
+      "title": "Feria Taurina — 2ª corrida (29 sep 2026, 16:30) — día clave",
+      "provider": "Casa Toreros / Plaza de Toros Carmelo Pérez",
+      "description": "Martes 29 sep 2026 — 2ª corrida. Actutoro: toros La Punta; rejoneo Tarik Othón; matadores Diego San Román y Arturo Gilio. Hora 16:30 (prensa local). Día clave de ambiente.",
+      "startAt": "2026-09-29T16:30:00-06:00",
+      "address": "Plaza de Toros Carmelo Pérez, San Miguel el Alto",
+      "sourceUrl": "https://www.actutoro.fr/deux-corridas-mixtes-pour-la-foire-de-san-miguel-el-alto/",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "verified",
+      "sourceType": "cursor",
+      "notes": "El 29 es día especialmente ocupado en feria. Serenata/programa cultural completo 2026 aún no hallado en fuente municipal detallada."
+    },
+    {
+      "externalId": "event-serenata-unknown-2026",
+      "type": "event",
+      "status": "researched",
+      "title": "Serenata(s) 2026 — sigue SIN cartel horario oficial",
+      "provider": "Por confirmar (Ayuntamiento / organizadores)",
+      "description": "Revisión 2: feriasenmexico.com.mx (jul 2026) aún dice «Programa… espéralo próximamente». descubrelosaltos.mx apunta a programa 2025. No hay fecha/hora oficial 2026 de serenata en Ayuntamiento. Antecedente cultural (domingos / feria) NO es confirmación 2026.",
+      "sourceUrl": "https://www.feriasenmexico.com.mx/feria-san-miguel-el-alto-2026/",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor",
+      "notes": "ACCIÓN: Facebook/IG Ayuntamiento SMA + preguntar en hotel. Domingo en estancia: 27 sep (también día de corrida). NO inventar horario."
+    },
+    {
+      "externalId": "other-connectivity-telcel",
+      "type": "other",
+      "status": "researched",
+      "title": "Respaldo conectividad: Telcel + CFE/Altán (mapas)",
+      "provider": "Telcel / CFE Telecom / Altán Redes",
+      "description": "Telcel: mapa cobertura nacional / por municipio — consultar SMA antes del viaje. IFT/Altán: mapa 4G interactivo para red mayorista (CFE Internet / OMVs). Sin medición in situ del hotel; no afirmar cobertura interior.",
+      "sourceUrl": "https://www.telcel.com/personas/quien-es-telcel/sobre-nosotros/mapas-cobertura",
+      "checkedAt": "2026-09-05T18:15:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "cursor",
+      "notes": "Plan datos Telcel + hotspot sigue siendo plan B obligatorio hasta confirmar Wi-Fi hotel."
+    }
+  ],
+  "itineraryItems": [
+    {
+      "externalId": "itin-25-arrival",
+      "title": "25 sep — llegada, check-in, reconocimiento suave",
+      "startAt": "2026-09-25T16:00:00-06:00",
+      "importance": "crucial",
+      "notes": "Preferir vuelo ~06:00–07:00 MEX→GDL + transfer a SMA. Opcional: Expo Diego Herrera noche del 25 si horario cuadra. Probar Wi-Fi."
+    },
+    {
+      "externalId": "itin-26-27-weekend",
+      "title": "26–27 sep — fin de semana pueblo / feria (tiempo libre)",
+      "startAt": "2026-09-26T11:00:00-06:00",
+      "endAt": "2026-09-27T23:00:00-06:00",
+      "importance": "recommended",
+      "notes": "Socializar, plaza, gastronomía. 27 sep 16:30 posible corrida (opcional). Dejar huecos."
+    },
+    {
+      "externalId": "itin-28-30-work",
+      "title": "28–30 sep — bloques de trabajo remoto + tardes libres",
+      "startAt": "2026-09-28T09:00:00-06:00",
+      "endAt": "2026-09-30T18:00:00-06:00",
+      "importance": "crucial",
+      "notes": "Mañanas/horario laboral en hotel si Wi-Fi aguanta; tardes/noche para pueblo. 29 sep 16:30 corrida — proteger esa tarde."
+    },
+    {
+      "externalId": "itin-01-return",
+      "title": "1 oct — regreso a CDMX",
+      "startAt": "2026-10-01T08:00:00-06:00",
+      "importance": "crucial",
+      "notes": "Preferir GDL→MEX ~13:46 AM o ~14:22 Volaris. Salir hotel SMA ~10:30–11:30 según modo. Buffer feria/tráfico."
+    }
+  ],
+  "checklistItems": [
+    {
+      "externalId": "chk-wifi-call",
+      "label": "Llamar hospedaje y confirmar Wi-Fi (velocidad / horario / cable si hay)",
+      "sortOrder": 0
+    },
+    {
+      "externalId": "chk-wifi-speedtest",
+      "label": "Pedir speed test o captura real de Mbps al hotel (si es posible)",
+      "sortOrder": 1
+    },
+    {
+      "externalId": "chk-mobile-coverage",
+      "label": "Verificar cobertura Telcel (y CFE/Altán) en la cuadra del hotel",
+      "sortOrder": 2
+    },
+    {
+      "externalId": "chk-hotspot",
+      "label": "Preparar hotspot de respaldo (datos Telcel u otro) antes del viaje",
+      "sortOrder": 3
+    },
+    {
+      "externalId": "chk-flights-checkout",
+      "label": "Cotizar en checkout Volaris/Aeroméxico/Viva fechas exactas 25 sep y 1 oct",
+      "sortOrder": 4
+    },
+    {
+      "externalId": "chk-transfer-quotes",
+      "label": "Pedir 2–3 cotizaciones transfer GDL aeropuerto → hotel SMA",
+      "sortOrder": 5
+    },
+    {
+      "externalId": "chk-serenata-program",
+      "label": "Conseguir programa oficial 2026 de serenatas/eventos (Ayuntamiento / redes)",
+      "sortOrder": 6
+    },
+    {
+      "externalId": "chk-lodging-availability",
+      "label": "Confirmar disponibilidad y tarifa feria 25 sep–1 oct en 2+ hoteles",
+      "sortOrder": 7
+    }
+  ],
+  "notes": [
+    {
+      "externalId": "note-research-limits",
+      "title": "Límites + filtro top-2 (rev.3)",
+      "body": "Rev.3 aplica regla de cantidad: se investigó más amplio, pero el paquete solo guarda las 2 mejores opciones por decisión (vuelos ida, vuelos regreso, hospedaje, transporte). Bus solo como referencia económica. Descartados del paquete: AM ida, González, renta auto, taxi módulo genérico, Jalostotitlán/Arandas, plaza genérica, expo ventana duplicada. Serenata 2026 sigue sin cartel. No se compró ni reservó nada."
+    },
+    {
+      "externalId": "note-wifi-policy",
+      "title": "Política Wi-Fi / trabajo remoto",
+      "body": "Ningún hotel se marca verified para Internet usable. Mesón anuncia red inalámbrica + sala de juntas (mejor señal para trabajo que solo “Wi-Fi” genérico), pero reseñas de terceros puntuaron Wi-Fi bajo: confirmar por teléfono. Hotspot Telcel es plan B obligatorio."
+    },
+    {
+      "externalId": "note-transport-preference",
+      "title": "Preferencia transporte",
+      "body": "Top-2: (1) DMx Travel cotizar, (2) transfer privado genérico. Bus Primera Plus solo referencia de precio bajo — no es la recomendación si priorizas tiempo/laptop."
+    },
+    {
+      "externalId": "note-arandas-jalos",
+      "title": "Arandas / Jalostotitlán",
+      "body": "Excursiones Arandas/Jalostotitlán omitidas del paquete (ruido). Siguen siendo opcionales fuera de inventario si hay auto y día libre (evitar 27 y 29)."
+    }
+  ]
+}
