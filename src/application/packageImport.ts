@@ -14,18 +14,15 @@ import type {
 } from '../domain/types'
 import { newId, nowIso, touchTimestamps } from './ids'
 import {
+  USER_DECISION_STATUSES,
+  checklistEntityId,
+  itineraryEntityId,
+  noteEntityId,
+  optionEntityId,
+  type PackageTravelOption,
   type TripPackageV1,
   validateTripPackage,
 } from './tripPackage'
-
-export class DuplicatePackageError extends Error {
-  readonly packageId: string
-  constructor(packageId: string) {
-    super(`El paquete «${packageId}» ya fue importado`)
-    this.name = 'DuplicatePackageError'
-    this.packageId = packageId
-  }
-}
 
 export class PackageValidationImportError extends Error {
   readonly errors: { path: string; message: string }[]
@@ -36,6 +33,16 @@ export class PackageValidationImportError extends Error {
     )
     this.name = 'PackageValidationImportError'
     this.errors = errors
+  }
+}
+
+/** @deprecated Re-import now upserts; kept for older callers. */
+export class DuplicatePackageError extends Error {
+  readonly packageId: string
+  constructor(packageId: string) {
+    super(`El paquete «${packageId}» ya fue importado`)
+    this.name = 'DuplicatePackageError'
+    this.packageId = packageId
   }
 }
 
@@ -62,11 +69,118 @@ function goalsFromLabels(labels: string[]): TravelGoal[] {
   return labels.map((label) => ({ id: newId(), label }))
 }
 
+function isUserDecisionStatus(
+  status: TravelOption['status'],
+): boolean {
+  return (USER_DECISION_STATUSES as readonly string[]).includes(status)
+}
+
+/** Research fields that define whether an option "changed" for preview. */
+function researchFingerprint(o: {
+  type: string
+  title: string
+  provider?: string
+  description?: string
+  startAt?: string
+  endAt?: string
+  origin?: string
+  destination?: string
+  address?: string
+  phone?: string
+  priceObserved?: number
+  currency?: string
+  sourceUrl?: string
+  checkedAt?: string
+  verificationStatus?: string
+  sourceType?: string
+  notes?: string
+  status: string
+}): string {
+  return JSON.stringify([
+    o.type,
+    o.title,
+    o.provider ?? '',
+    o.description ?? '',
+    o.startAt ?? '',
+    o.endAt ?? '',
+    o.origin ?? '',
+    o.destination ?? '',
+    o.address ?? '',
+    o.phone ?? '',
+    o.priceObserved ?? null,
+    o.currency ?? '',
+    o.sourceUrl ?? '',
+    o.checkedAt ?? '',
+    o.verificationStatus ?? '',
+    o.sourceType ?? '',
+    o.notes ?? '',
+    o.status,
+  ])
+}
+
+export type ImportUpdatePlan = {
+  isUpdate: boolean
+  packageId: string
+  revision: number
+  tripId: string | null
+  created: number
+  updated: number
+  unchanged: number
+  decisionsPreserved: number
+}
+
 export type ImportPackageResult = {
   tripId: string
   packageId: string
+  revision: number
   optionCount: number
   createdTrip: boolean
+  isUpdate: boolean
+  created: number
+  updated: number
+  unchanged: number
+  decisionsPreserved: number
+}
+
+function buildOptionFromPackage(
+  pkg: TripPackageV1,
+  tripId: string,
+  incoming: PackageTravelOption,
+  existing: TravelOption | undefined,
+  now: string,
+): TravelOption {
+  const id = optionEntityId(pkg.packageId, incoming.externalId)
+  const preserveDecision =
+    existing !== undefined && isUserDecisionStatus(existing.status)
+
+  return {
+    id,
+    tripId,
+    type: incoming.type,
+    status: preserveDecision ? existing.status : incoming.status,
+    title: incoming.title,
+    provider: incoming.provider,
+    description: incoming.description,
+    startAt: incoming.startAt,
+    endAt: incoming.endAt,
+    origin: incoming.origin,
+    destination: incoming.destination,
+    address: incoming.address,
+    phone: incoming.phone,
+    priceObserved: incoming.priceObserved,
+    currency: incoming.currency,
+    sourceUrl: incoming.sourceUrl,
+    checkedAt: incoming.checkedAt,
+    verificationStatus: incoming.verificationStatus,
+    sourceType: incoming.sourceType,
+    notes: incoming.notes,
+    externalId: incoming.externalId,
+    packageId: pkg.packageId,
+    bookingId: existing?.bookingId,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    syncStatus: existing?.syncStatus ?? 'local',
+  }
 }
 
 export function createTravelOptionService(repos: Repositories) {
@@ -136,7 +250,6 @@ export function createTravelOptionService(repos: Repositories) {
         id: bookingId,
         tripId: option.tripId,
         type: mapOptionTypeToBookingType(option.type),
-        // Managed reservation from research — not assumed paid/confirmed.
         status: 'selected',
         title: option.title,
         provider: option.provider,
@@ -189,12 +302,74 @@ export function createPackageImportService(repos: Repositories) {
     getById: (packageId: string) => repos.packageImports.getById(packageId),
 
     /**
-     * Validate + import TripPackage v1 transactionally.
-     * Refuses silently-duplicate packageId (throws DuplicatePackageError).
+     * Dry-run counts for preview (new / updated / unchanged / decisions kept).
+     * Does not write.
+     */
+    planImport: async (pkg: TripPackageV1): Promise<ImportUpdatePlan> => {
+      const existingImport = await repos.packageImports.getById(pkg.packageId)
+      const tripId =
+        existingImport?.tripId ?? pkg.trip.id ?? null
+
+      let created = 0
+      let updated = 0
+      let unchanged = 0
+      let decisionsPreserved = 0
+
+      for (const incoming of pkg.travelOptions) {
+        const id = optionEntityId(pkg.packageId, incoming.externalId)
+        const existing = await repos.travelOptions.getById(id)
+        if (!existing) {
+          created += 1
+          continue
+        }
+        if (isUserDecisionStatus(existing.status)) {
+          decisionsPreserved += 1
+        }
+        const beforeNorm = researchFingerprint({
+          type: existing.type,
+          title: existing.title,
+          provider: existing.provider,
+          description: existing.description,
+          startAt: existing.startAt,
+          endAt: existing.endAt,
+          origin: existing.origin,
+          destination: existing.destination,
+          address: existing.address,
+          phone: existing.phone,
+          priceObserved: existing.priceObserved,
+          currency: existing.currency,
+          sourceUrl: existing.sourceUrl,
+          checkedAt: existing.checkedAt,
+          verificationStatus: existing.verificationStatus,
+          sourceType: existing.sourceType,
+          notes: existing.notes,
+          status: incoming.status,
+        })
+        const after = researchFingerprint(incoming)
+        if (beforeNorm === after) unchanged += 1
+        else updated += 1
+      }
+
+      return {
+        isUpdate: Boolean(existingImport),
+        packageId: pkg.packageId,
+        revision: pkg.revision,
+        tripId,
+        created,
+        updated,
+        unchanged,
+        decisionsPreserved,
+      }
+    },
+
+    /**
+     * Validate + import/upsert TripPackage v1 transactionally.
+     * Re-import updates by externalId; never deletes missing options;
+     * never overwrites selected/booked/rejected or bookingId.
      */
     importPackage: async (
       raw: unknown,
-      options?: { force?: boolean },
+      _options?: { force?: boolean },
     ): Promise<ImportPackageResult> => {
       const validated = validateTripPackage(raw)
       if (!validated.ok) {
@@ -203,11 +378,8 @@ export function createPackageImportService(repos: Repositories) {
       const pkg = validated.package
 
       const existingImport = await repos.packageImports.getById(pkg.packageId)
-      if (existingImport && !options?.force) {
-        throw new DuplicatePackageError(pkg.packageId)
-      }
-
-      const tripId = pkg.trip.id ?? newId()
+      const tripId =
+        existingImport?.tripId ?? pkg.trip.id ?? newId()
       const existingTrip = await repos.trips.getById(tripId)
       const createdTrip = !existingTrip
       const now = nowIso()
@@ -242,96 +414,112 @@ export function createPackageImportService(repos: Repositories) {
             syncStatus: 'local',
           }
 
-      const optionsToWrite: TravelOption[] = pkg.travelOptions.map((o) => {
-        const id = o.externalId
-          ? `opt-${pkg.packageId}-${o.externalId}`
-          : newId()
-        return {
+      let created = 0
+      let updated = 0
+      let unchanged = 0
+      let decisionsPreserved = 0
+      const optionsToWrite: TravelOption[] = []
+
+      for (const incoming of pkg.travelOptions) {
+        const id = optionEntityId(pkg.packageId, incoming.externalId)
+        const existing = await repos.travelOptions.getById(id)
+        const next = buildOptionFromPackage(
+          pkg,
+          tripId,
+          incoming,
+          existing,
+          now,
+        )
+        if (!existing) {
+          created += 1
+        } else {
+          if (isUserDecisionStatus(existing.status)) {
+            decisionsPreserved += 1
+          }
+          const beforeNorm = researchFingerprint({
+            type: existing.type,
+            title: existing.title,
+            provider: existing.provider,
+            description: existing.description,
+            startAt: existing.startAt,
+            endAt: existing.endAt,
+            origin: existing.origin,
+            destination: existing.destination,
+            address: existing.address,
+            phone: existing.phone,
+            priceObserved: existing.priceObserved,
+            currency: existing.currency,
+            sourceUrl: existing.sourceUrl,
+            checkedAt: existing.checkedAt,
+            verificationStatus: existing.verificationStatus,
+            sourceType: existing.sourceType,
+            notes: existing.notes,
+            status: incoming.status,
+          })
+          const after = researchFingerprint(incoming)
+          if (beforeNorm === after) unchanged += 1
+          else updated += 1
+        }
+        optionsToWrite.push(next)
+      }
+
+      const itineraryToWrite: ItineraryItem[] = []
+      for (const item of pkg.itineraryItems) {
+        const id = itineraryEntityId(pkg.packageId, item.externalId)
+        const existing = await repos.itineraryItems.getById(id)
+        // Do not touch items the user linked to a Booking.
+        if (existing?.bookingId) {
+          continue
+        }
+        itineraryToWrite.push({
           id,
           tripId,
-          type: o.type,
-          status: o.status,
-          title: o.title,
-          provider: o.provider,
-          description: o.description,
-          startAt: o.startAt,
-          endAt: o.endAt,
-          origin: o.origin,
-          destination: o.destination,
-          address: o.address,
-          phone: o.phone,
-          priceObserved: o.priceObserved,
-          currency: o.currency,
-          sourceUrl: o.sourceUrl,
-          checkedAt: o.checkedAt,
-          verificationStatus: o.verificationStatus,
-          sourceType: o.sourceType,
-          notes: o.notes,
-          externalId: o.externalId,
-          packageId: pkg.packageId,
-          createdAt: now,
+          title: item.title,
+          startAt: item.startAt,
+          endAt: item.endAt,
+          place: item.place,
+          importance: item.importance,
+          goalIds: existing?.goalIds ?? [],
+          notes: item.notes,
+          createdAt: existing?.createdAt ?? now,
           updatedAt: now,
-          syncStatus: 'local' as const,
-        }
-      })
+          syncStatus: existing?.syncStatus ?? 'local',
+        })
+      }
 
-      const itineraryToWrite: ItineraryItem[] = pkg.itineraryItems.map(
-        (item, index) => {
-          const id = item.externalId
-            ? `itin-${pkg.packageId}-${item.externalId}`
-            : newId()
-          return {
-            id,
-            tripId,
-            title: item.title,
-            startAt: item.startAt,
-            endAt: item.endAt,
-            place: item.place,
-            importance: item.importance,
-            goalIds: [],
-            notes: item.notes,
-            createdAt: now,
-            updatedAt: now,
-            syncStatus: 'local' as const,
-            // keep sort via index in notes if needed
-            ...(index >= 0 ? {} : {}),
-          }
-        },
-      )
+      const checklistToWrite: ChecklistItem[] = []
+      for (const [index, item] of pkg.checklistItems.entries()) {
+        const id = checklistEntityId(pkg.packageId, item.externalId)
+        const existing = await repos.checklist.getById(id)
+        checklistToWrite.push({
+          id,
+          tripId,
+          label: item.label,
+          // Preserve traveler checklist progress.
+          status: existing?.status ?? 'open',
+          dueAt: item.dueAt,
+          sortOrder: item.sortOrder ?? existing?.sortOrder ?? index,
+          relatedBookingId: existing?.relatedBookingId,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+          syncStatus: existing?.syncStatus ?? 'local',
+        })
+      }
 
-      const checklistToWrite: ChecklistItem[] = pkg.checklistItems.map(
-        (item, index) => {
-          const id = item.externalId
-            ? `chk-${pkg.packageId}-${item.externalId}`
-            : newId()
-          return {
-            id,
-            tripId,
-            label: item.label,
-            status: 'open' as const,
-            dueAt: item.dueAt,
-            sortOrder: item.sortOrder ?? index,
-            createdAt: now,
-            updatedAt: now,
-            syncStatus: 'local' as const,
-          }
-        },
-      )
-
-      const notesToWrite: Note[] = pkg.notes.map((n) => {
-        const id = n.externalId
-          ? `note-${pkg.packageId}-${n.externalId}`
-          : newId()
-        return {
+      const notesToWrite: Note[] = []
+      for (const n of pkg.notes) {
+        const id = noteEntityId(pkg.packageId, n.externalId)
+        const existing = await repos.notes.getById(id)
+        notesToWrite.push({
           id,
           tripId,
           title: n.title,
           body: n.body,
-          createdAt: now,
+          createdAt: existing?.createdAt ?? now,
           updatedAt: now,
-          syncStatus: 'local' as const,
-        }
-      })
+          syncStatus: existing?.syncStatus ?? 'local',
+        })
+      }
 
       const importRecord: PackageImport = {
         id: pkg.packageId,
@@ -340,6 +528,8 @@ export function createPackageImportService(repos: Repositories) {
         importedAt: now,
         optionCount: optionsToWrite.length,
         schemaVersion: pkg.schemaVersion,
+        revision: pkg.revision,
+        generatedAt: pkg.generatedAt,
       }
 
       try {
@@ -354,15 +544,7 @@ export function createPackageImportService(repos: Repositories) {
             db.packageImports,
           ],
           async () => {
-            if (options?.force && existingImport) {
-              const oldOpts = await db.travelOptions
-                .where('packageId')
-                .equals(pkg.packageId)
-                .toArray()
-              for (const o of oldOpts) {
-                await db.travelOptions.delete(o.id)
-              }
-            }
+            // Upsert only — never delete options absent from this revision.
             await db.trips.put(trip)
             for (const o of optionsToWrite) await db.travelOptions.put(o)
             for (const i of itineraryToWrite) await db.itineraryItems.put(i)
@@ -380,8 +562,14 @@ export function createPackageImportService(repos: Repositories) {
       return {
         tripId,
         packageId: pkg.packageId,
+        revision: pkg.revision,
         optionCount: optionsToWrite.length,
         createdTrip,
+        isUpdate: Boolean(existingImport),
+        created,
+        updated,
+        unchanged,
+        decisionsPreserved,
       }
     },
 

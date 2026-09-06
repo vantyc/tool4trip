@@ -275,15 +275,20 @@ export interface TravelOption {
   syncStatus: SyncStatus
 }
 
-/** Record of an imported TripPackage — used for duplicate detection. */
+/** Record of an imported TripPackage — identity for research revisions. */
 export interface PackageImport {
   /** Same as TripPackage.packageId */
   id: string
   tripId: string
   title: string
+  /** Last successful import/upsert time. */
   importedAt: string
   optionCount: number
   schemaVersion: number
+  /** Last applied package revision (TripPackage.revision). */
+  revision?: number
+  /** TripPackage.generatedAt from the last applied package. */
+  generatedAt?: string
 }
 
 /** Application-layer view after joining Booking → ItineraryItem. */

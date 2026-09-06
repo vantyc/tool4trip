@@ -1,6 +1,8 @@
 {
   "schemaVersion": 1,
   "packageId": "demo-sma-research-2026-09",
+  "revision": 1,
+  "generatedAt": "2026-09-05T17:00:00-06:00",
   "trip": {
     "id": "demo-sma-research-trip",
     "title": "San Miguel el Alto [FICTICIO / DEMO investigación]",
@@ -105,7 +107,7 @@
     {
       "externalId": "bus-b",
       "type": "bus",
-      "status": "selected",
+      "status": "shortlisted",
       "title": "[FICTICIO] Autobús GDL → San Miguel opción B (más tarde)",
       "provider": "DEMO Bus Lines",
       "startAt": "2026-09-25T16:30:00-06:00",

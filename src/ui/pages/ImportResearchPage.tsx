@@ -1,10 +1,8 @@
 import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { services } from '../../application'
-import {
-  DuplicatePackageError,
-  PackageValidationImportError,
-} from '../../application/packageImport'
+import { PackageValidationImportError } from '../../application/packageImport'
+import type { ImportUpdatePlan } from '../../application/packageImport'
 import {
   summarizePackage,
   type TripPackageV1,
@@ -14,8 +12,12 @@ import {
 type Phase =
   | { kind: 'pick' }
   | { kind: 'invalid'; errors: { path: string; message: string }[] }
-  | { kind: 'preview'; pkg: TripPackageV1; duplicate: boolean }
-  | { kind: 'done'; tripId: string; packageId: string }
+  | {
+      kind: 'preview'
+      pkg: TripPackageV1
+      plan: ImportUpdatePlan
+    }
+  | { kind: 'done'; tripId: string; packageId: string; isUpdate: boolean }
 
 export function ImportResearchPage() {
   const navigate = useNavigate()
@@ -44,11 +46,11 @@ export function ImportResearchPage() {
         setPhase({ kind: 'invalid', errors: result.errors })
         return
       }
-      const existing = await services.packages.getById(result.package.packageId)
+      const plan = await services.packages.planImport(result.package)
       setPhase({
         kind: 'preview',
         pkg: result.package,
-        duplicate: Boolean(existing),
+        plan,
       })
     } catch (err) {
       setPhase({
@@ -63,23 +65,20 @@ export function ImportResearchPage() {
     }
   }
 
-  async function handleImport(force = false) {
+  async function handleImport() {
     if (phase.kind !== 'preview') return
     setBusy(true)
     setMessage(null)
     try {
-      const result = await services.packages.importPackage(phase.pkg, {
-        force,
-      })
+      const result = await services.packages.importPackage(phase.pkg)
       setPhase({
         kind: 'done',
         tripId: result.tripId,
         packageId: result.packageId,
+        isUpdate: result.isUpdate,
       })
     } catch (err) {
-      if (err instanceof DuplicatePackageError) {
-        setMessage(err.message)
-      } else if (err instanceof PackageValidationImportError) {
+      if (err instanceof PackageValidationImportError) {
         setPhase({ kind: 'invalid', errors: err.errors })
       } else {
         setMessage(err instanceof Error ? err.message : 'Error al importar')
@@ -103,7 +102,8 @@ export function ImportResearchPage() {
       <h1>Importar investigación</h1>
       <p className="muted">
         Carga un TripPackage v1 (.json). Las opciones quedan como investigación,
-        no como reservas confirmadas.
+        no como reservas confirmadas. Reimportar el mismo packageId actualiza por
+        externalId sin borrar decisiones tuyas.
       </p>
 
       {phase.kind === 'pick' && (
@@ -142,19 +142,20 @@ export function ImportResearchPage() {
       {phase.kind === 'preview' && (
         <PreviewBlock
           pkg={phase.pkg}
-          duplicate={phase.duplicate}
+          plan={phase.plan}
           busy={busy}
           message={message}
           onCancel={reset}
-          onImport={() => void handleImport(false)}
-          onForce={() => void handleImport(true)}
+          onConfirm={() => void handleImport()}
         />
       )}
 
       {phase.kind === 'done' && (
         <div>
           <p className="status-ok">
-            Importación lista ({phase.packageId}).
+            {phase.isUpdate
+              ? `Investigación actualizada (${phase.packageId}).`
+              : `Importación lista (${phase.packageId}).`}
           </p>
           <div className="actions">
             <button
@@ -178,25 +179,23 @@ export function ImportResearchPage() {
 
 function PreviewBlock({
   pkg,
-  duplicate,
+  plan,
   busy,
   message,
   onCancel,
-  onImport,
-  onForce,
+  onConfirm,
 }: {
   pkg: TripPackageV1
-  duplicate: boolean
+  plan: ImportUpdatePlan
   busy: boolean
   message: string | null
   onCancel: () => void
-  onImport: () => void
-  onForce: () => void
+  onConfirm: () => void
 }) {
   const s = summarizePackage(pkg)
   return (
     <div className="import-preview">
-      <h2>Vista previa</h2>
+      <h2>{plan.isUpdate ? 'Actualizar investigación' : 'Vista previa'}</h2>
       <dl className="preview-dl">
         <dt>Viaje</dt>
         <dd>{s.title}</dd>
@@ -210,6 +209,14 @@ function PreviewBlock({
         <dd>
           <code>{s.packageId}</code>
         </dd>
+        <dt>revision</dt>
+        <dd>{s.revision}</dd>
+        {s.generatedAt && (
+          <>
+            <dt>generatedAt</dt>
+            <dd>{s.generatedAt}</dd>
+          </>
+        )}
         <dt>Opciones</dt>
         <dd>{s.optionCount}</dd>
         <dt>Vuelos</dt>
@@ -226,10 +233,23 @@ function PreviewBlock({
         </dd>
       </dl>
 
-      {duplicate && (
-        <p className="status-bad">
-          Este packageId ya fue importado. No se duplicará en silencio. Puedes
-          cancelar o reemplazar las opciones de ese paquete.
+      {plan.isUpdate && (
+        <dl className="preview-dl update-plan">
+          <dt>Nuevas</dt>
+          <dd>{plan.created}</dd>
+          <dt>Actualizadas</dt>
+          <dd>{plan.updated}</dd>
+          <dt>Sin cambios</dt>
+          <dd>{plan.unchanged}</dd>
+          <dt>Decisiones preservadas</dt>
+          <dd>{plan.decisionsPreserved}</dd>
+        </dl>
+      )}
+
+      {plan.isUpdate && (
+        <p className="muted">
+          Se actualizarán datos investigados por externalId. No se borrarán
+          opciones ausentes ni se sobrescribirán selected / booked / rejected.
         </p>
       )}
       {message && <p className="status-bad">{message}</p>}
@@ -243,25 +263,20 @@ function PreviewBlock({
         >
           Cancelar
         </button>
-        {!duplicate ? (
-          <button
-            type="button"
-            className="sum-action"
-            onClick={onImport}
-            disabled={busy}
-          >
-            {busy ? 'Importando…' : 'Importar'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="sum-action"
-            onClick={onForce}
-            disabled={busy}
-          >
-            {busy ? 'Reemplazando…' : 'Reemplazar importación'}
-          </button>
-        )}
+        <button
+          type="button"
+          className="sum-action"
+          onClick={onConfirm}
+          disabled={busy}
+        >
+          {busy
+            ? plan.isUpdate
+              ? 'Actualizando…'
+              : 'Importando…'
+            : plan.isUpdate
+              ? 'Actualizar'
+              : 'Importar'}
+        </button>
       </div>
     </div>
   )
