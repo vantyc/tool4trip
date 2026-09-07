@@ -30,3 +30,6 @@ dist-ssr
 
 # Personal research TripPackages (real trips; keep local)
 imports/
+
+# Local destination research PDFs / notes (not versionable)
+destinos/
