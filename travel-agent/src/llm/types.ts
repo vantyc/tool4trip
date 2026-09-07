@@ -15,6 +15,8 @@ export type ChatMessage = {
   name?: string
   tool_call_id?: string
   tool_calls?: ToolCall[]
+  /** Present on some reasoning models; preserve across turns when returned. */
+  reasoning?: string
 }
 
 export type ToolDefinition = {
@@ -26,18 +28,36 @@ export type ToolDefinition = {
   }
 }
 
+export type JsonSchemaResponseFormat = {
+  type: 'json_schema'
+  json_schema: {
+    name: string
+    strict?: boolean
+    schema: Record<string, unknown>
+  }
+}
+
 export type ChatCompletionParams = {
   messages: ChatMessage[]
   tools?: ToolDefinition[]
   tool_choice?: 'auto' | 'none'
-  response_format?: { type: 'json_object' }
+  response_format?: { type: 'json_object' } | JsonSchemaResponseFormat
   temperature?: number
+  /** Optional completion size cap (provider default if unset by caller). */
+  max_tokens?: number
   signal?: AbortSignal
+}
+
+export type TokenUsage = {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
 }
 
 export type ChatCompletionResult = {
   message: ChatMessage
   finishReason: string | null
+  usage?: TokenUsage
 }
 
 /** Swappable LLM backend — OpenAI-compatible now; Ollama later via same shape. */

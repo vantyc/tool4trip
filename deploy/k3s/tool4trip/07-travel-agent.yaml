@@ -36,15 +36,23 @@ spec:
             - name: LLM_PROVIDER
               value: "openai-compatible"
             - name: LLM_BASE_URL
-              value: "https://api.groq.com/openai/v1"
+              value: "https://api.openai.com/v1"
             - name: LLM_MODEL
-              value: "llama-3.3-70b-versatile"
+              value: "gpt-4.1-mini"
+            - name: LLM_MAX_TOKENS
+              value: "8192"
             - name: AGENT_MAX_TOOL_CALLS
               value: "6"
             - name: AGENT_MAX_STEPS
               value: "8"
             - name: LLM_TIMEOUT_MS
-              value: "60000"
+              value: "180000"
+            - name: AGENT_JOB_MAX_CONCURRENCY
+              value: "1"
+            - name: AGENT_JOB_TTL_MS
+              value: "2700000"
+            - name: AGENT_JOB_MAX_JOBS
+              value: "50"
             - name: LLM_API_KEY
               valueFrom:
                 secretKeyRef:

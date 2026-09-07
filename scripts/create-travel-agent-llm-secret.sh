@@ -6,7 +6,7 @@
 set -euo pipefail
 
 NS="${NS:-tool4trip}"
-: "${LLM_API_KEY:?Set LLM_API_KEY (Groq key)}"
+: "${LLM_API_KEY:?Set LLM_API_KEY (OpenAI key)}"
 : "${TAVILY_API_KEY:?Set TAVILY_API_KEY}"
 
 kubectl -n "$NS" create secret generic travel-agent-llm \

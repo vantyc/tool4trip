@@ -21,6 +21,7 @@ export function AskTravelPage() {
   const [tripId, setTripId] = useState(initialTripId)
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  const [jobStatus, setJobStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [proposal, setProposal] = useState<AgentProposal | null>(null)
   const [plan, setPlan] = useState<ImportUpdatePlan | null>(null)
@@ -41,16 +42,25 @@ export function AskTravelPage() {
     setError(null)
     setProposal(null)
     setPlan(null)
+    setJobStatus('queued')
     try {
-      const p = await askTravelAgent(services, {
-        tripId,
-        prompt: prompt.trim(),
-      })
+      const p = await askTravelAgent(
+        services,
+        {
+          tripId,
+          prompt: prompt.trim(),
+        },
+        {
+          onProgress: (prog) => setJobStatus(prog.status),
+        },
+      )
       const preview = await previewAgentProposal(services, p)
       setProposal(p)
       setPlan(preview.plan)
+      setJobStatus(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al consultar')
+      setJobStatus(null)
     } finally {
       setBusy(false)
     }
@@ -84,9 +94,8 @@ export function AskTravelPage() {
       <h1>Ask Travel</h1>
       <p className="muted">
         Describe un cambio o pregunta sobre tu viaje. Verás una propuesta antes
-        de aplicar nada. Sin investigación externa en esta fase el agente solo
-        usa datos ya guardados (salvo tools webSearch/fetchUrl cuando estén
-        disponibles).
+        de aplicar nada. El agente puede usar webSearch y fetchUrl cuando haga
+        falta investigar en la web; nada se escribe hasta que pulses Aplicar.
       </p>
 
       {!online && (
@@ -130,9 +139,19 @@ export function AskTravelPage() {
           onClick={() => void handleAsk()}
           disabled={busy || !online || !tripId || !prompt.trim()}
         >
-          {busy ? 'Consultando…' : 'Preguntar'}
+          {busy ? 'Investigando…' : 'Preguntar'}
         </button>
       </div>
+
+      {busy && jobStatus && (
+        <p className="muted" aria-live="polite">
+          {jobStatus === 'queued'
+            ? 'En cola…'
+            : jobStatus === 'running'
+              ? 'Investigando… (puedes dejar esta pestaña abierta)'
+              : `Estado: ${jobStatus}`}
+        </p>
+      )}
 
       {error && <p className="status-bad">{error}</p>}
 

@@ -248,3 +248,45 @@ export const agentAskRequestSchema = z
   .strict()
 
 export type AgentAskRequest = z.infer<typeof agentAskRequestSchema>
+
+/** Async Ask Travel job lifecycle. */
+export const agentJobStatusSchema = z.enum([
+  'queued',
+  'running',
+  'succeeded',
+  'failed',
+])
+
+export type AgentJobStatus = z.infer<typeof agentJobStatusSchema>
+
+export const agentJobCreateResponseSchema = z
+  .object({
+    jobId: z.string().min(1),
+    status: z.literal('queued'),
+  })
+  .strict()
+
+export type AgentJobCreateResponse = z.infer<typeof agentJobCreateResponseSchema>
+
+export const agentJobErrorSchema = z
+  .object({
+    message: z.string().min(1),
+    code: z.string().optional(),
+  })
+  .strict()
+
+export const agentJobStatusResponseSchema = z
+  .object({
+    jobId: z.string().min(1),
+    status: agentJobStatusSchema,
+    createdAt: z.string().min(1),
+    startedAt: z.string().optional(),
+    finishedAt: z.string().optional(),
+    progress: z.string().optional(),
+    toolTrace: z.array(toolTraceEntrySchema).optional(),
+    proposal: agentProposalSchema.optional(),
+    error: agentJobErrorSchema.optional(),
+  })
+  .strict()
+
+export type AgentJobStatusResponse = z.infer<typeof agentJobStatusResponseSchema>

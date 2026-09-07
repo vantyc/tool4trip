@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   LLMProvider,
   ToolCall,
+  TokenUsage,
 } from './types.ts'
 import { AgentRuntimeError } from './config.ts'
 
@@ -12,6 +13,7 @@ type OpenAiChatResponse = {
     message?: {
       role?: string
       content?: string | null
+      reasoning?: string
       tool_calls?: {
         id?: string
         type?: string
@@ -20,11 +22,16 @@ type OpenAiChatResponse = {
     }
     finish_reason?: string | null
   }[]
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  }
   error?: { message?: string }
 }
 
 /**
- * OpenAI-compatible chat completions client (Groq today, OpenAI/Ollama later).
+ * OpenAI-compatible chat completions client (OpenAI today; Ollama later via same shape).
  * Swap only via LLM_BASE_URL / LLM_MODEL / LLM_API_KEY — no PWA changes.
  */
 export class OpenAICompatibleProvider implements LLMProvider {
@@ -34,6 +41,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     readonly model: string,
     private readonly baseUrl: string,
     private readonly apiKey: string,
+    private readonly defaultMaxTokens = 8192,
   ) {}
 
   async chat(params: ChatCompletionParams): Promise<ChatCompletionResult> {
@@ -42,12 +50,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
       model: this.model,
       messages: params.messages.map(serializeMessage),
       temperature: params.temperature ?? 0.2,
+      max_tokens: params.max_tokens ?? this.defaultMaxTokens,
     }
+    // OpenAI rejects tool_choice when tools are omitted; only send with tools.
     if (params.tools?.length) {
       body.tools = params.tools
       body.tool_choice = params.tool_choice ?? 'auto'
-    } else if (params.tool_choice === 'none') {
-      body.tool_choice = 'none'
     }
     if (params.response_format) {
       body.response_format = params.response_format
@@ -104,13 +112,35 @@ export class OpenAICompatibleProvider implements LLMProvider {
       role: 'assistant',
       content: choice.message.content ?? null,
       tool_calls: toolCalls.length ? toolCalls : undefined,
+      reasoning:
+        typeof choice.message.reasoning === 'string'
+          ? choice.message.reasoning
+          : undefined,
     }
 
     return {
       message,
       finishReason: choice.finish_reason ?? null,
+      usage: normalizeUsage(data.usage),
     }
   }
+}
+
+function normalizeUsage(
+  usage: OpenAiChatResponse['usage'],
+): TokenUsage | undefined {
+  if (!usage) return undefined
+  const inputTokens = usage.prompt_tokens
+  const outputTokens = usage.completion_tokens
+  const totalTokens = usage.total_tokens
+  if (
+    inputTokens === undefined &&
+    outputTokens === undefined &&
+    totalTokens === undefined
+  ) {
+    return undefined
+  }
+  return { inputTokens, outputTokens, totalTokens }
 }
 
 function serializeMessage(m: ChatMessage): Record<string, unknown> {
@@ -121,6 +151,7 @@ function serializeMessage(m: ChatMessage): Record<string, unknown> {
   if (m.name) out.name = m.name
   if (m.tool_call_id) out.tool_call_id = m.tool_call_id
   if (m.tool_calls?.length) out.tool_calls = m.tool_calls
+  if (m.reasoning) out.reasoning = m.reasoning
   return out
 }
 

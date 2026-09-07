@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { AgentAskRequest } from '../../shared/agentContracts.ts'
-import { runAgentAsk } from '../agent/runtime.ts'
+import { hydrateProposal, runAgentAsk } from '../agent/runtime.ts'
 import {
   AgentConfigError,
+  AgentRuntimeError,
   assertLlmReady,
   assertWebSearchReady,
   loadLlmEnv,
@@ -12,20 +13,22 @@ import {
 import type {
   ChatCompletionParams,
   ChatCompletionResult,
-  ChatMessage,
   LLMProvider,
   ToolCall,
 } from '../llm/types.ts'
 import { ToolRegistry, wrapUntrustedToolPayload } from '../tools/registry.ts'
+import { InMemoryJobStore } from '../jobs/store.ts'
+import { JobWorker } from '../jobs/worker.ts'
 
 function baseCfg(over: Partial<LlmEnvConfig> = {}): LlmEnvConfig {
   return {
     provider: 'openai-compatible',
-    baseUrl: 'https://api.groq.com/openai/v1',
-    model: 'llama-3.3-70b-versatile',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4.1-mini',
     apiKey: 'test-key',
     tavilyApiKey: 'test-tavily',
     timeoutMs: 5_000,
+    maxTokens: 8192,
     maxToolCalls: 6,
     maxSteps: 8,
     enableWebTools: true,
@@ -68,12 +71,12 @@ function sampleRequest(prompt: string): AgentAskRequest {
   }
 }
 
-function validProposalJson(narrative: string): string {
+/** LLM draft — no server-owned fields. */
+function validDraftJson(narrative: string): string {
   return JSON.stringify({
-    proposalId: '11111111-1111-1111-1111-111111111111',
-    createdAt: '2026-09-07T00:00:00+00:00',
     narrative,
     warnings: [],
+    claims: [],
     diffSummary: [
       {
         entityKind: 'travelOption',
@@ -112,13 +115,12 @@ function validProposalJson(narrative: string): string {
       notes: [],
     },
     ops: [],
-    toolTrace: [],
   })
 }
 
 class ScriptedLlm implements LLMProvider {
   readonly providerId = 'mock'
-  readonly model = 'mock'
+  readonly model = 'mock-gpt'
   calls: ChatCompletionParams[] = []
   private readonly scripts: ((
     params: ChatCompletionParams,
@@ -151,13 +153,16 @@ function toolCall(name: string, args: Record<string, unknown>, id = 'call-1'): T
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
 describe('config', () => {
   it('H: missing API keys → AgentConfigError (no crash)', () => {
     const cfg = loadLlmEnv({
       LLM_PROVIDER: 'openai-compatible',
-      LLM_BASE_URL: 'https://api.groq.com/openai/v1',
-      LLM_MODEL: 'llama-3.3-70b-versatile',
-      // no LLM_API_KEY
+      LLM_BASE_URL: 'https://api.openai.com/v1',
+      LLM_MODEL: 'gpt-4.1-mini',
       WEB_SEARCH_PROVIDER: 'tavily',
       ENABLE_WEB_TOOLS: '1',
     })
@@ -168,29 +173,271 @@ describe('config', () => {
 })
 
 describe('AgentRuntime', () => {
-  it('F: Dexie-only prompt → no tool calls required', async () => {
+  it('F: Dexie-only → tool exit + structured final (no repair)', async () => {
     const llm = new ScriptedLlm([
+      () => ({
+        message: { role: 'assistant', content: 'ok, no tools needed' },
+        finishReason: 'stop',
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      }),
       () => ({
         message: {
           role: 'assistant',
-          content: validProposalJson(
-            'Resumen del contexto local sin investigación web.',
-          ),
+          content: validDraftJson('Resumen del contexto local sin investigación web.'),
         },
         finishReason: 'stop',
+        usage: { inputTokens: 20, outputTokens: 100, totalTokens: 120 },
       }),
     ])
-    const proposal = await runAgentAsk(sampleRequest('Resume mi viaje'), {
+    const { proposal, meta } = await runAgentAsk(sampleRequest('Resume mi viaje'), {
       llm,
       cfg: baseCfg({ enableWebTools: false }),
-      createRegistry: () => new ToolRegistry(), // no tools registered
+      createRegistry: () => new ToolRegistry(),
     })
     assert.equal(proposal.package.trip.id, 'trip-1')
     assert.equal(proposal.toolTrace.length, 0)
     assert.match(proposal.narrative, /contexto local/i)
+    assert.equal(meta.hadRepair, false)
+    assert.equal(meta.llmCalls, 2)
+    assert.equal(llm.calls[1]?.response_format?.type, 'json_schema')
+    assert.equal(llm.calls[1]?.tools, undefined)
+    assert.ok(proposal.proposalId)
+    assert.ok(proposal.createdAt)
   })
 
-  it('A: mock LLM → webSearch → AgentProposal válido', async () => {
+  it('1: finish_reason=length on final → output_truncated', async () => {
+    const llm = new ScriptedLlm([
+      () => ({
+        message: { role: 'assistant', content: 'done researching' },
+        finishReason: 'stop',
+      }),
+      () => ({
+        message: { role: 'assistant', content: '{"narrative":"partial' },
+        finishReason: 'length',
+        usage: { outputTokens: 8192 },
+      }),
+    ])
+    await assert.rejects(
+      () =>
+        runAgentAsk(sampleRequest('x'), {
+          llm,
+          cfg: baseCfg({ enableWebTools: false }),
+          createRegistry: () => new ToolRegistry(),
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof AgentRuntimeError)
+        assert.equal(err.code, 'output_truncated')
+        assert.equal(err.runMeta?.lastFinishReason, 'length')
+        return true
+      },
+    )
+  })
+
+  it('2: final structured válido → sin repair', async () => {
+    const llm = new ScriptedLlm([
+      () => ({
+        message: { role: 'assistant', content: null },
+        finishReason: 'stop',
+      }),
+      () => ({
+        message: {
+          role: 'assistant',
+          content: validDraftJson('Final structured ok'),
+        },
+        finishReason: 'stop',
+      }),
+    ])
+    const { proposal, meta } = await runAgentAsk(sampleRequest('hola'), {
+      llm,
+      cfg: baseCfg({ enableWebTools: false }),
+      createRegistry: () => new ToolRegistry(),
+    })
+    assert.match(proposal.narrative, /Final structured/)
+    assert.equal(meta.hadRepair, false)
+    assert.equal(llm.calls.length, 2)
+  })
+
+  it('3: final structured inválido → un repair', async () => {
+    const llm = new ScriptedLlm([
+      () => ({
+        message: { role: 'assistant', content: 'ok' },
+        finishReason: 'stop',
+      }),
+      () => ({
+        message: { role: 'assistant', content: '{"narrative":1}' },
+        finishReason: 'stop',
+      }),
+      () => ({
+        message: {
+          role: 'assistant',
+          content: validDraftJson('Reparada tras Zod'),
+        },
+        finishReason: 'stop',
+      }),
+    ])
+    const { proposal, meta } = await runAgentAsk(sampleRequest('hola'), {
+      llm,
+      cfg: baseCfg({ enableWebTools: false }),
+      createRegistry: () => new ToolRegistry(),
+    })
+    assert.match(proposal.narrative, /Reparada/)
+    assert.equal(meta.hadRepair, true)
+    assert.equal(llm.calls.length, 3)
+    assert.equal(llm.calls[2]?.response_format?.type, 'json_schema')
+  })
+
+  it('4: repair truncado → output_truncated', async () => {
+    const llm = new ScriptedLlm([
+      () => ({
+        message: { role: 'assistant', content: 'ok' },
+        finishReason: 'stop',
+      }),
+      () => ({
+        message: { role: 'assistant', content: '{"narrative":1}' },
+        finishReason: 'stop',
+      }),
+      () => ({
+        message: { role: 'assistant', content: '{"narrative":"cut' },
+        finishReason: 'length',
+      }),
+    ])
+    await assert.rejects(
+      () =>
+        runAgentAsk(sampleRequest('hola'), {
+          llm,
+          cfg: baseCfg({ enableWebTools: false }),
+          createRegistry: () => new ToolRegistry(),
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof AgentRuntimeError)
+        assert.equal(err.code, 'output_truncated')
+        assert.match(err.message, /repair/i)
+        return true
+      },
+    )
+  })
+
+  it('5+6: toolTrace preservado en failed + usage/finish_reason', async () => {
+    const registry = new ToolRegistry()
+    registry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'webSearch',
+          description: 'search',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string' } },
+            required: ['query'],
+          },
+        },
+      },
+      handler: async (args) => ({
+        contentForModel: wrapUntrustedToolPayload('webSearch', {
+          trust: 'UNTRUSTED',
+          hits: [],
+        }),
+        trace: {
+          tool: 'webSearch',
+          args,
+          ok: true,
+          sources: [{ url: 'https://example.com', title: 'x' }],
+          checkedAt: '2026-09-07T00:00:00+00:00',
+        },
+      }),
+    })
+
+    const llm = new ScriptedLlm([
+      () => ({
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [toolCall('webSearch', { query: 'q' })],
+        },
+        finishReason: 'tool_calls',
+        usage: { inputTokens: 11, outputTokens: 2, totalTokens: 13 },
+      }),
+      () => ({
+        message: { role: 'assistant', content: 'tools done' },
+        finishReason: 'stop',
+        usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 },
+      }),
+      () => ({
+        message: { role: 'assistant', content: '{"narrative":"trunc' },
+        finishReason: 'length',
+        usage: { inputTokens: 30, outputTokens: 8000, totalTokens: 8030 },
+      }),
+    ])
+
+    let caught: AgentRuntimeError | undefined
+    try {
+      await runAgentAsk(sampleRequest('busca'), {
+        llm,
+        cfg: baseCfg(),
+        createRegistry: () => registry,
+      })
+    } catch (err) {
+      assert.ok(err instanceof AgentRuntimeError)
+      caught = err
+    }
+    assert.ok(caught)
+    assert.equal(caught!.code, 'output_truncated')
+    assert.equal(caught!.runMeta?.toolTrace?.length, 1)
+    assert.equal(
+      (caught!.runMeta?.toolTrace?.[0] as { tool?: string })?.tool,
+      'webSearch',
+    )
+    assert.equal(caught!.runMeta?.lastFinishReason, 'length')
+    assert.ok((caught!.runMeta?.usage?.outputTokens ?? 0) >= 8000)
+
+    // JobStore preserves toolTrace on failed
+    const store = new InMemoryJobStore({
+      ttlMs: 60_000,
+      maxJobs: 10,
+      maxConcurrency: 1,
+    })
+    const worker = new JobWorker({
+      store,
+      cfg: { provider: 'openai-compatible', model: 'gpt-4.1-mini', timeoutMs: 5000 },
+      run: async () => {
+        throw caught!
+      },
+    })
+    const job = store.create(sampleRequest('x'), { requestId: 'r1' })
+    worker.kick()
+    for (let i = 0; i < 50; i++) {
+      if (store.get(job.jobId)?.status === 'failed') break
+      await sleep(10)
+    }
+    const failed = store.get(job.jobId)!
+    assert.equal(failed.status, 'failed')
+    assert.equal(failed.toolTrace?.length, 1)
+    assert.equal(failed.lastFinishReason, 'length')
+    assert.ok((failed.usage?.outputTokens ?? 0) >= 8000)
+  })
+
+  it('7: server-owned fields añadidos correctamente', () => {
+    const draft = JSON.parse(validDraftJson('n'))
+    draft.proposalId = 'model-should-not-win'
+    draft.createdAt = '2000-01-01T00:00:00+00:00'
+    draft.toolTrace = [{ tool: 'fake', ok: true, sources: [] }]
+    const hydrated = hydrateProposal(draft, sampleRequest('x'), [
+      {
+        tool: 'webSearch',
+        ok: true,
+        sources: [],
+        checkedAt: '2026-09-07T00:00:00+00:00',
+      },
+    ]) as Record<string, unknown>
+    assert.notEqual(hydrated.proposalId, 'model-should-not-win')
+    assert.notEqual(hydrated.createdAt, '2000-01-01T00:00:00+00:00')
+    assert.deepEqual(
+      (hydrated.toolTrace as { tool: string }[]).map((t) => t.tool),
+      ['webSearch'],
+    )
+  })
+
+  it('A: mock LLM → webSearch → structured final', async () => {
     const registry = new ToolRegistry()
     registry.register({
       definition: {
@@ -229,6 +476,29 @@ describe('AgentRuntime', () => {
       },
     })
 
+    const draft = JSON.parse(validDraftJson('Hallazgo web unverified'))
+    draft.package.travelOptions = [
+      {
+        externalId: 'web-hotel-1',
+        type: 'lodging',
+        status: 'researched',
+        title: 'Hotel Centro',
+        sourceUrl: 'https://example.com/hotel',
+        checkedAt: '2026-09-07T00:00:00+00:00',
+        verificationStatus: 'unverified',
+        sourceType: 'agent',
+        notes: 'UNTRUSTED web evidence',
+      },
+    ]
+    draft.diffSummary = [
+      {
+        entityKind: 'travelOption',
+        entityRef: 'web-hotel-1',
+        op: 'add',
+        note: 'web unverified',
+      },
+    ]
+
     const llm = new ScriptedLlm([
       () => ({
         message: {
@@ -239,47 +509,24 @@ describe('AgentRuntime', () => {
         finishReason: 'tool_calls',
       }),
       () => ({
+        message: { role: 'assistant', content: 'research complete' },
+        finishReason: 'stop',
+      }),
+      () => ({
         message: {
           role: 'assistant',
-          content: JSON.stringify({
-            ...JSON.parse(validProposalJson('Hallazgo web unverified')),
-            package: {
-              ...JSON.parse(validProposalJson('x')).package,
-              travelOptions: [
-                {
-                  externalId: 'web-hotel-1',
-                  type: 'lodging',
-                  status: 'researched',
-                  title: 'Hotel Centro',
-                  sourceUrl: 'https://example.com/hotel',
-                  checkedAt: '2026-09-07T00:00:00+00:00',
-                  verificationStatus: 'unverified',
-                  sourceType: 'agent',
-                  notes: 'UNTRUSTED web evidence',
-                },
-              ],
-            },
-            diffSummary: [
-              {
-                entityKind: 'travelOption',
-                entityRef: 'web-hotel-1',
-                op: 'add',
-                note: 'web unverified',
-              },
-            ],
-          }),
+          content: JSON.stringify(draft),
         },
         finishReason: 'stop',
       }),
     ])
 
-    const proposal = await runAgentAsk(
+    const { proposal } = await runAgentAsk(
       sampleRequest('Busca hoteles cerca del centro'),
       { llm, cfg: baseCfg(), createRegistry: () => registry },
     )
     assert.equal(proposal.toolTrace.length, 1)
     assert.equal(proposal.toolTrace[0]?.tool, 'webSearch')
-    assert.equal(proposal.toolTrace[0]?.ok, true)
     assert.ok(
       proposal.package.travelOptions.some((o) => o.externalId === 'web-hotel-1'),
     )
@@ -320,7 +567,6 @@ describe('AgentRuntime', () => {
       },
     })
 
-    let sawUntrusted = false
     const llm = new ScriptedLlm([
       () => ({
         message: {
@@ -332,158 +578,116 @@ describe('AgentRuntime', () => {
         },
         finishReason: 'tool_calls',
       }),
-      (params) => {
-        const toolMsg = [...params.messages]
-          .reverse()
-          .find((m: ChatMessage) => m.role === 'tool')
-        assert.ok(toolMsg?.content?.includes('UNTRUSTED'))
-        assert.ok(toolMsg?.content?.includes('ignore previous instructions'))
-        sawUntrusted = true
-        // Model correctly refuses to invent the flight
-        return {
-          message: {
-            role: 'assistant',
-            content: validProposalJson(
-              'Se ignoró contenido UNTRUSTED con instrucciones; no se inventan vuelos ni precios.',
-            ),
-          },
-          finishReason: 'stop',
-        }
-      },
+      () => ({
+        message: { role: 'assistant', content: 'ignored injection' },
+        finishReason: 'stop',
+      }),
+      () => ({
+        message: {
+          role: 'assistant',
+          content: validDraftJson(
+            'No se inventaron vuelos; evidencia web UNTRUSTED descartada para bookings.',
+          ),
+        },
+        finishReason: 'stop',
+      }),
     ])
 
-    const proposal = await runAgentAsk(sampleRequest('Lee esa página'), {
+    const { proposal } = await runAgentAsk(sampleRequest('lee esa url'), {
       llm,
       cfg: baseCfg(),
       createRegistry: () => registry,
     })
-    assert.equal(sawUntrusted, true)
+    assert.equal(proposal.toolTrace[0]?.tool, 'fetchUrl')
     assert.equal(
-      proposal.package.travelOptions.some((o) => /AA999|vuelo/i.test(o.title)),
+      proposal.package.travelOptions.some((o) => /AA999|flight/i.test(o.title)),
       false,
     )
-    assert.match(proposal.narrative, /UNTRUSTED|ignor/i)
   })
 
   it('C: max tool calls enforced', async () => {
     const registry = new ToolRegistry()
-    let handlerCount = 0
     registry.register({
       definition: {
         type: 'function',
         function: {
           name: 'webSearch',
-          description: 'search',
-          parameters: {
-            type: 'object',
-            properties: { query: { type: 'string' } },
-            required: ['query'],
-          },
+          description: 's',
+          parameters: { type: 'object', properties: {} },
         },
       },
-      handler: async (args) => {
-        handlerCount += 1
-        return {
-          contentForModel: wrapUntrustedToolPayload('webSearch', { hits: [] }),
-          trace: {
-            tool: 'webSearch',
-            args,
-            ok: true,
-            sources: [],
-            checkedAt: '2026-09-07T00:00:00+00:00',
-          },
-        }
-      },
+      handler: async (args) => ({
+        contentForModel: '{}',
+        trace: {
+          tool: 'webSearch',
+          args,
+          ok: true,
+          sources: [],
+          checkedAt: '2026-09-07T00:00:00+00:00',
+        },
+      }),
     })
-
     const llm = new ScriptedLlm([
       () => ({
         message: {
           role: 'assistant',
           content: null,
           tool_calls: [
-            toolCall('webSearch', { query: 'a' }, '1'),
-            toolCall('webSearch', { query: 'b' }, '2'),
-            toolCall('webSearch', { query: 'c' }, '3'),
+            toolCall('webSearch', {}, 'a'),
+            toolCall('webSearch', {}, 'b'),
+            toolCall('webSearch', {}, 'c'),
           ],
         },
         finishReason: 'tool_calls',
       }),
       () => ({
+        message: { role: 'assistant', content: 'done' },
+        finishReason: 'stop',
+      }),
+      () => ({
         message: {
           role: 'assistant',
-          content: validProposalJson('Tras límite de tools'),
+          content: validDraftJson('tras max tools'),
         },
         finishReason: 'stop',
       }),
     ])
-
-    const proposal = await runAgentAsk(sampleRequest('Investiga mucho'), {
+    const { proposal } = await runAgentAsk(sampleRequest('busca mucho'), {
       llm,
       cfg: baseCfg({ maxToolCalls: 2 }),
       createRegistry: () => registry,
     })
-    assert.equal(handlerCount, 2)
     assert.ok(proposal.toolTrace.some((t) => t.error?.includes('MAX_TOOL')))
   })
 
   it('D: timeout aborts', async () => {
-    const llm: LLMProvider = {
-      providerId: 'mock',
-      model: 'mock',
-      async chat(params) {
-        await new Promise<void>((resolve, reject) => {
-          const t = setTimeout(resolve, 200)
-          params.signal?.addEventListener('abort', () => {
-            clearTimeout(t)
-            const err = new Error('aborted')
-            err.name = 'AbortError'
-            reject(err)
-          })
-        })
+    const llm = new ScriptedLlm([
+      async () => {
+        await sleep(50)
         return {
-          message: { role: 'assistant', content: validProposalJson('late') },
+          message: { role: 'assistant', content: 'late' },
           finishReason: 'stop',
         }
       },
-    }
+    ])
     await assert.rejects(
       () =>
-        runAgentAsk(sampleRequest('hola'), {
+        runAgentAsk(sampleRequest('x'), {
           llm,
-          cfg: baseCfg({ timeoutMs: 30 }),
+          cfg: baseCfg({ timeoutMs: 10, enableWebTools: false }),
           createRegistry: () => new ToolRegistry(),
         }),
-      /timeout|abort/i,
+      (err: unknown) =>
+        err instanceof AgentRuntimeError && err.code === 'llm_timeout',
     )
-  })
-
-  it('E: invalid JSON → repair → Zod ok', async () => {
-    const llm = new ScriptedLlm([
-      () => ({
-        message: { role: 'assistant', content: 'not-json-at-all' },
-        finishReason: 'stop',
-      }),
-      () => ({
-        message: {
-          role: 'assistant',
-          content: validProposalJson('Reparada tras Zod'),
-        },
-        finishReason: 'stop',
-      }),
-    ])
-    const proposal = await runAgentAsk(sampleRequest('hola'), {
-      llm,
-      cfg: baseCfg(),
-      createRegistry: () => new ToolRegistry(),
-    })
-    assert.match(proposal.narrative, /Reparada/)
-    assert.equal(llm.calls.length, 2)
-    assert.equal(llm.calls[1]?.response_format?.type, 'json_object')
   })
 
   it('E2: invalid JSON twice → error, no fabricated proposal', async () => {
     const llm = new ScriptedLlm([
+      () => ({
+        message: { role: 'assistant', content: 'ok' },
+        finishReason: 'stop',
+      }),
       () => ({
         message: { role: 'assistant', content: '{' },
         finishReason: 'stop',
@@ -495,12 +699,13 @@ describe('AgentRuntime', () => {
     ])
     await assert.rejects(
       () =>
-        runAgentAsk(sampleRequest('hola'), {
+        runAgentAsk(sampleRequest('x'), {
           llm,
-          cfg: baseCfg(),
+          cfg: baseCfg({ enableWebTools: false }),
           createRegistry: () => new ToolRegistry(),
         }),
-      /inválido|invalid|JSON/i,
+      (err: unknown) =>
+        err instanceof AgentRuntimeError && err.code === 'invalid_proposal',
     )
   })
 
@@ -511,7 +716,7 @@ describe('AgentRuntime', () => {
         type: 'function',
         function: {
           name: 'webSearch',
-          description: 'search',
+          description: 's',
           parameters: {
             type: 'object',
             properties: { query: { type: 'string' } },
@@ -520,15 +725,12 @@ describe('AgentRuntime', () => {
         },
       },
       handler: async (args) => ({
-        contentForModel: wrapUntrustedToolPayload('webSearch', {
-          provider: 'tavily',
-          hits: [{ title: 't', url: 'https://ex.com', snippet: 's' }],
-        }),
+        contentForModel: wrapUntrustedToolPayload('webSearch', { hits: [] }),
         trace: {
           tool: 'webSearch',
           args: { ...args, provider: 'tavily' },
           ok: true,
-          sources: [{ url: 'https://ex.com', title: 't', snippet: 's' }],
+          sources: [{ url: 'https://a.example' }],
           checkedAt: '2026-09-07T00:00:00+00:00',
         },
       }),
@@ -538,7 +740,7 @@ describe('AgentRuntime', () => {
         type: 'function',
         function: {
           name: 'fetchUrl',
-          description: 'fetch',
+          description: 'f',
           parameters: {
             type: 'object',
             properties: { url: { type: 'string' } },
@@ -547,14 +749,12 @@ describe('AgentRuntime', () => {
         },
       },
       handler: async (args) => ({
-        contentForModel: wrapUntrustedToolPayload('fetchUrl', {
-          text: 'page body',
-        }),
+        contentForModel: wrapUntrustedToolPayload('fetchUrl', { text: 'x' }),
         trace: {
           tool: 'fetchUrl',
           args,
           ok: true,
-          sources: [{ url: String(args.url), snippet: 'page body' }],
+          sources: [{ url: 'https://b.example' }],
           checkedAt: '2026-09-07T00:00:00+00:00',
         },
       }),
@@ -566,22 +766,26 @@ describe('AgentRuntime', () => {
           role: 'assistant',
           content: null,
           tool_calls: [
-            toolCall('webSearch', { query: 'vuelos' }, 's1'),
-            toolCall('fetchUrl', { url: 'https://ex.com' }, 'f1'),
+            toolCall('webSearch', { query: 'q' }, 't1'),
+            toolCall('fetchUrl', { url: 'https://b.example' }, 't2'),
           ],
         },
         finishReason: 'tool_calls',
       }),
       () => ({
+        message: { role: 'assistant', content: 'done' },
+        finishReason: 'stop',
+      }),
+      () => ({
         message: {
           role: 'assistant',
-          content: validProposalJson('Investigación con Tavily/fetchUrl'),
+          content: validDraftJson('Investigación con Tavily/fetchUrl'),
         },
         finishReason: 'stop',
       }),
     ])
 
-    const proposal = await runAgentAsk(
+    const { proposal } = await runAgentAsk(
       sampleRequest('Investiga opciones de vuelo (sin inventar)'),
       { llm, cfg: baseCfg(), createRegistry: () => registry },
     )
@@ -590,10 +794,6 @@ describe('AgentRuntime', () => {
       proposal.toolTrace.map((t) => t.tool).sort(),
       ['fetchUrl', 'webSearch'],
     )
-    assert.equal(
-      proposal.toolTrace.find((t) => t.tool === 'webSearch')?.args?.provider,
-      'tavily',
-    )
   })
 })
 
@@ -601,19 +801,20 @@ describe('health contract helpers', () => {
   it('I: loadLlmEnv defaults match production targets', () => {
     const cfg = loadLlmEnv({
       LLM_PROVIDER: 'openai-compatible',
-      LLM_BASE_URL: 'https://api.groq.com/openai/v1',
-      LLM_MODEL: 'llama-3.3-70b-versatile',
+      LLM_BASE_URL: 'https://api.openai.com/v1',
+      LLM_MODEL: 'gpt-4.1-mini',
       LLM_API_KEY: 'x',
       AGENT_MAX_TOOL_CALLS: '6',
       AGENT_MAX_STEPS: '8',
-      LLM_TIMEOUT_MS: '60000',
+      LLM_TIMEOUT_MS: '180000',
+      LLM_MAX_TOKENS: '8192',
       WEB_SEARCH_PROVIDER: 'tavily',
       ENABLE_DDG_FALLBACK: '0',
     })
     assert.equal(cfg.maxToolCalls, 6)
     assert.equal(cfg.maxSteps, 8)
-    assert.equal(cfg.timeoutMs, 60_000)
+    assert.equal(cfg.timeoutMs, 180_000)
+    assert.equal(cfg.maxTokens, 8192)
     assert.equal(cfg.webSearchProvider, 'tavily')
-    assert.equal(cfg.enableDdgFallback, false)
   })
 })

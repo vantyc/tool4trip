@@ -7,20 +7,34 @@ import {
 } from './llm/config.ts'
 import { OpenAICompatibleProvider } from './llm/openaiCompatible.ts'
 import type { LLMProvider } from './llm/types.ts'
-import { runAgentAsk } from './agent/runtime.ts'
+import {
+  runAgentAsk,
+  type AgentRunResult,
+  type AgentRuntimeDeps,
+} from './agent/runtime.ts'
 
 export type BuildProposalDeps = {
   cfg?: LlmEnvConfig
   llm?: LLMProvider
+  jobId?: string
+  requestId?: string
 }
 
 /**
- * Entry used by HTTP handler — AgentRuntime only (no heuristic wantsResearch).
+ * Entry used by HTTP/job worker — AgentRuntime only (no heuristic wantsResearch).
  */
 export async function buildProposal(
   req: AgentAskRequest,
   deps: BuildProposalDeps = {},
 ): Promise<AgentProposal> {
+  const result = await buildProposalWithMeta(req, deps)
+  return result.proposal
+}
+
+export async function buildProposalWithMeta(
+  req: AgentAskRequest,
+  deps: BuildProposalDeps = {},
+): Promise<AgentRunResult> {
   const cfg = deps.cfg ?? loadLlmEnv()
   assertLlmReady(cfg)
   if (cfg.enableWebTools) {
@@ -29,7 +43,20 @@ export async function buildProposal(
 
   const llm =
     deps.llm ??
-    new OpenAICompatibleProvider(cfg.model, cfg.baseUrl, cfg.apiKey)
+    new OpenAICompatibleProvider(
+      cfg.model,
+      cfg.baseUrl,
+      cfg.apiKey,
+      cfg.maxTokens,
+    )
 
-  return runAgentAsk(req, { llm, cfg })
+  const runDeps: AgentRuntimeDeps = {
+    llm,
+    cfg,
+    jobId: deps.jobId,
+    requestId: deps.requestId,
+    tripId: req.tripId,
+  }
+
+  return runAgentAsk(req, runDeps)
 }

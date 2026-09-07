@@ -11,12 +11,32 @@ export class AgentConfigError extends Error {
 
 export class AgentRuntimeError extends Error {
   readonly code: string
+  /** Optional run diagnostics attached on failure (toolTrace, usage, …). */
+  readonly runMeta?: AgentRunFailureMeta
 
-  constructor(message: string, code = 'agent_runtime') {
+  constructor(
+    message: string,
+    code = 'agent_runtime',
+    runMeta?: AgentRunFailureMeta,
+  ) {
     super(message)
     this.name = 'AgentRuntimeError'
     this.code = code
+    this.runMeta = runMeta
   }
+}
+
+export type AgentRunFailureMeta = {
+  toolTrace?: unknown[]
+  steps?: number
+  llmCalls?: number
+  lastFinishReason?: string | null
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+  }
+  hadRepair?: boolean
 }
 
 export type LlmEnvConfig = {
@@ -26,6 +46,7 @@ export type LlmEnvConfig = {
   apiKey: string
   tavilyApiKey: string
   timeoutMs: number
+  maxTokens: number
   maxToolCalls: number
   maxSteps: number
   enableWebTools: boolean
@@ -41,7 +62,9 @@ export function loadLlmEnv(
   const model = (env.LLM_MODEL || '').trim()
   const apiKey = (env.LLM_API_KEY || '').trim()
   const tavilyApiKey = (env.TAVILY_API_KEY || '').trim()
-  const timeoutMs = positiveInt(env.LLM_TIMEOUT_MS, 60_000)
+  const timeoutMs = positiveInt(env.LLM_TIMEOUT_MS, 180_000)
+  // Optional completion size cap (defaults leave room for AgentProposal JSON).
+  const maxTokens = positiveInt(env.LLM_MAX_TOKENS, 8192)
   const maxToolCalls = positiveInt(env.AGENT_MAX_TOOL_CALLS, 6)
   const maxSteps = positiveInt(env.AGENT_MAX_STEPS, 8)
   const enableWebTools = env.ENABLE_WEB_TOOLS !== '0'
@@ -55,6 +78,7 @@ export function loadLlmEnv(
     apiKey,
     tavilyApiKey,
     timeoutMs,
+    maxTokens,
     maxToolCalls,
     maxSteps,
     enableWebTools,

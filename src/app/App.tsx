@@ -60,7 +60,12 @@ export function App() {
       <header className="app-header">
         <div className="app-header-top">
           <p className="brand">Tool4Trip</p>
-          <ConnectionIndicator />
+          <div className="app-header-meta">
+            <ConnectionIndicator />
+            <a className="logout-link" href="/logout">
+              Cerrar sesión
+            </a>
+          </div>
         </div>
         <p className="tagline">Fuente operativa de tu viaje</p>
       </header>
