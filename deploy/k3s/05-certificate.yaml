@@ -11,7 +11,8 @@
 #   Path: /.well-known/acme-challenge/<token>
 # Ese path es más específico que el Prefix "/" de ToolForSpeak, así que
 # Traefik lo prioriza. Evidencia: tool4speak-tls ya se emitió así con el
-# catch-all "/" presente. No hay redirect HTTP→HTTPS global en Traefik.
+# catch-all "/" presente. Redirect HTTP→HTTPS para /travel: ver 06-http-redirect.yaml
+# (Tool4Speak "/" sigue sin redirect HTTP global).
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

@@ -1,0 +1,19 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tool4trip-tls
+  namespace: tool4trip
+  labels:
+    app: tool4trip-web
+spec:
+  secretName: tool4trip-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+  dnsNames:
+    - tool4trip.com
+    - www.tool4trip.com
+  usages:
+    - digital signature
+    - key encipherment

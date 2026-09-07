@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool4trip-web
+  namespace: tool4trip
+  labels:
+    app: tool4trip-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tool4trip-web
+  template:
+    metadata:
+      labels:
+        app: tool4trip-web
+    spec:
+      imagePullSecrets:
+        - name: ghcr-registry
+      containers:
+        - name: tool4trip-web
+          image: ghcr.io/vantyc/viajes:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tool4trip-web
+  namespace: tool4trip
+  labels:
+    app: tool4trip-web
+spec:
+  type: ClusterIP
+  selector:
+    app: tool4trip-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: tool4trip-forwardauth
+  namespace: tool4trip
+  labels:
+    app: tool4trip-auth
+spec:
+  forwardAuth:
+    address: http://tool4trip-auth.tool4trip.svc.cluster.local:8080/_auth/verify
+    authResponseHeaders:
+      - X-Viajes-User
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: tool4trip
+  labels:
+    app: tool4trip-web
+spec:
+  redirectScheme:
+    permanent: true
+    scheme: https
+---
+# www → apex (optional convenience)
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: www-to-apex
+  namespace: tool4trip
+  labels:
+    app: tool4trip-web
+spec:
+  redirectRegex:
+    permanent: true
+    regex: ^https://www\.tool4trip\.com/(.*)
+    replacement: https://tool4trip.com/${1}

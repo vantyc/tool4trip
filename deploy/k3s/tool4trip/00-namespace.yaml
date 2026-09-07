@@ -1,0 +1,8 @@
+# Namespace dedicado para Tool4Trip (dominio tool4trip.com).
+# Independiente de tool4speak / namespace viajes.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tool4trip
+  labels:
+    app.kubernetes.io/name: tool4trip

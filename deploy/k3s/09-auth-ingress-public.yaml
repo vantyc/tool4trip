@@ -1,0 +1,87 @@
+# Public auth routes — no Basic Auth, no ForwardAuth.
+# Safe to apply BEFORE cutover: only exposes the login form + login POST.
+# Logout is also public (clears cookie; does not reveal PWA).
+#
+# More-specific paths win over Prefix /travel on viajes-web.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: viajes-auth-public
+  namespace: viajes
+  labels:
+    app: viajes-auth
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # Must beat Prefix /travel on viajes-web (ForwardAuth), or /travel/login loops.
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4speak.com
+      http:
+        paths:
+          - path: /travel/login
+            pathType: Exact
+            backend:
+              service:
+                name: viajes-auth
+                port:
+                  number: 8080
+          - path: /travel/api/login
+            pathType: Exact
+            backend:
+              service:
+                name: viajes-auth
+                port:
+                  number: 8080
+          - path: /travel/logout
+            pathType: Exact
+            backend:
+              service:
+                name: viajes-auth
+                port:
+                  number: 8080
+          - path: /travel/api/logout
+            pathType: Exact
+            backend:
+              service:
+                name: viajes-auth
+                port:
+                  number: 8080
+    - host: www.tool4speak.com
+      http:
+        paths:
+          - path: /travel/login
+            pathType: Exact
+            backend:
+              service:
+                name: viajes-auth
+                port:
+                  number: 8080
+          - path: /travel/api/login
+            pathType: Exact
+            backend:
+              service:
+                name: viajes-auth
+                port:
+                  number: 8080
+          - path: /travel/logout
+            pathType: Exact
+            backend:
+              service:
+                name: viajes-auth
+                port:
+                  number: 8080
+          - path: /travel/api/logout
+            pathType: Exact
+            backend:
+              service:
+                name: viajes-auth
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - tool4speak.com
+        - www.tool4speak.com
+      secretName: viajes-tls

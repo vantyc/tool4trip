@@ -32,7 +32,7 @@ export function TripListPage() {
 
   return (
     <section className="page">
-      <h1>Viajes</h1>
+      <h1>Tool4Trip</h1>
       <p className="muted">
         Organiza un viaje como fuente operativa. Los datos DEMO están marcados
         como FICTICIOS.
@@ -47,6 +47,9 @@ export function TripListPage() {
         <button type="button" onClick={() => void handleSeed()} disabled={busy}>
           {busy ? 'Cargando…' : 'Cargar seed San Miguel (FICTICIO)'}
         </button>
+        <Link to="/ask" className="sum-action">
+          Ask Travel
+        </Link>
         <Link to="/import" className="sum-action">
           Importar investigación
         </Link>

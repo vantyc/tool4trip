@@ -28,7 +28,7 @@ export function validatePwaInvariants(): {
     checks.push({ name, pass, detail })
   }
 
-  assert('base path', APP_BASE === '/travel/', `base=${APP_BASE}`)
+  assert('base path', APP_BASE === '/', `base=${APP_BASE}`)
   assert('idb name stable', IDB_DATABASE_NAME === 'viajes_db', IDB_DATABASE_NAME)
   assert(
     'idb schema versioned',
@@ -46,6 +46,11 @@ export function validatePwaInvariants(): {
     'apple touch icon link',
     indexHtml.includes('apple-touch-icon'),
     'apple-touch-icon present',
+  )
+  assert(
+    'brand Tool4Trip',
+    indexHtml.includes('Tool4Trip'),
+    'title/meta Tool4Trip',
   )
 
   const icons = [
@@ -74,18 +79,25 @@ export function validatePwaInvariants(): {
     start_url?: string
     scope?: string
     display?: string
+    name?: string
     icons?: { src: string }[]
   }
 
   assert(
     'manifest start_url',
-    manifest.start_url === '/travel/' || manifest.start_url === '/travel',
+    manifest.start_url === '/' || manifest.start_url === './',
     `start_url=${manifest.start_url}`,
   )
   assert(
     'manifest scope',
-    typeof manifest.scope === 'string' && manifest.scope.startsWith('/travel'),
+    typeof manifest.scope === 'string' &&
+      (manifest.scope === '/' || manifest.scope.startsWith('/')),
     `scope=${manifest.scope}`,
+  )
+  assert(
+    'manifest name Tool4Trip',
+    manifest.name === 'Tool4Trip',
+    `name=${manifest.name}`,
   )
   assert(
     'manifest display standalone',
@@ -100,21 +112,14 @@ export function validatePwaInvariants(): {
 
   const builtIndex = readFileSync(distIndex, 'utf8')
   assert(
-    'dist assets under /travel/',
-    builtIndex.includes('/travel/assets/') ||
-      builtIndex.includes('src="/travel/'),
-    'hashed assets prefixed',
+    'dist assets under /assets/',
+    builtIndex.includes('/assets/') || builtIndex.includes('assets/'),
+    'hashed assets present',
   )
   assert(
-    'no root-only asset href',
-    !/src="\/assets\//.test(builtIndex) &&
-      !/href="\/assets\//.test(builtIndex),
-    'no /assets without /travel',
-  )
-  assert(
-    'manifest link under /travel/',
-    builtIndex.includes('/travel/manifest.webmanifest'),
-    'manifest href',
+    'no /travel asset prefix',
+    !builtIndex.includes('/travel/assets/'),
+    'legacy /travel/assets gone',
   )
 
   if (existsSync(distSw)) {
@@ -130,9 +135,9 @@ export function validatePwaInvariants(): {
       'no IDB wipe in service worker',
     )
     assert(
-      'sw navigateFallback /travel/',
-      sw.includes('/travel/') || sw.includes('travel'),
-      'fallback scoped',
+      'sw navigateFallback root',
+      sw.includes('index.html'),
+      'fallback present',
     )
   } else {
     assert('sw.js exists', false, 'dist/sw.js missing')

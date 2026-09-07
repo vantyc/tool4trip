@@ -1,0 +1,48 @@
+# CUTOVER: Basic Auth → cookie session (ForwardAuth)
+# NO aplicar este archivo hasta completar la checklist de 11-CUTOVER-SESSION-AUTH.md
+#
+# After apply:
+#   - viajes-web uses ForwardAuth only (no basicAuth)
+#   - public login Ingress (09) stays as-is
+#   - HTTP→HTTPS redirect (06) stays as-is
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: viajes-web
+  namespace: viajes
+  labels:
+    app: viajes-web
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: viajes-viajes-forwardauth@kubernetescrd
+    # Lower than viajes-auth-public (100) so Exact login/logout win.
+    traefik.ingress.kubernetes.io/router.priority: "50"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4speak.com
+      http:
+        paths:
+          - path: /travel
+            pathType: Prefix
+            backend:
+              service:
+                name: viajes-web
+                port:
+                  number: 80
+    - host: www.tool4speak.com
+      http:
+        paths:
+          - path: /travel
+            pathType: Prefix
+            backend:
+              service:
+                name: viajes-web
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - tool4speak.com
+        - www.tool4speak.com
+      secretName: viajes-tls

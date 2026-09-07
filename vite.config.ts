@@ -2,15 +2,14 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-/** Production URL path — must stay in sync with k8s Ingress (/travel/). */
-export const APP_BASE = '/travel/'
+/** Production URL path — Tool4Trip serves at domain root. */
+export const APP_BASE = '/'
 
 export default defineConfig({
   base: APP_BASE,
   plugins: [
     react(),
     VitePWA({
-      // Precache new assets; activate when possible. Does NOT touch IndexedDB.
       registerType: 'autoUpdate',
       includeAssets: [
         'favicon.svg',
@@ -20,9 +19,9 @@ export default defineConfig({
         'icons/pwa-512x512-maskable.png',
       ],
       manifest: {
-        id: APP_BASE,
-        name: 'Viajes',
-        short_name: 'Viajes',
+        id: '/',
+        name: 'Tool4Trip',
+        short_name: 'Tool4Trip',
         description:
           'Organizador personal de viajes — fuente operativa offline',
         theme_color: '#1a3a4a',
@@ -31,8 +30,8 @@ export default defineConfig({
         orientation: 'portrait-primary',
         lang: 'es',
         dir: 'ltr',
-        start_url: APP_BASE,
-        scope: APP_BASE,
+        start_url: '/',
+        scope: '/',
         icons: [
           {
             src: 'icons/pwa-192x192.png',
@@ -61,20 +60,17 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // App shell only — never cache document Blobs (those live in IndexedDB).
         globPatterns: [
           '**/*.{js,css,html,ico,png,svg,woff2,webmanifest}',
         ],
-        navigateFallback: `${APP_BASE}index.html`,
-        // Only SPA routes under /travel/ — ignore other hosts/paths.
-        navigateFallbackAllowlist: [/^\/travel\//],
+        navigateFallback: '/index.html',
+        // App navigations only — leave /api/* and /login to the network.
+        navigateFallbackDenylist: [/^\/api\//, /^\/login$/, /^\/logout$/],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
-        // No runtimeCaching for maps/CDN/APIs — offline = precache + IndexedDB.
       },
       devOptions: {
-        // Keep SW off in plain `vite` dev unless explicitly enabled.
         enabled: false,
       },
     }),

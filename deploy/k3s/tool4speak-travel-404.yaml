@@ -1,0 +1,149 @@
+# Block /travel on tool4speak.com after move to tool4trip.com.
+# Without this, Prefix "/" of Tool4Speak would serve the SPA (200) for /travel/*.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: travel-gone-nginx
+  namespace: tool4speak
+  labels:
+    app: travel-gone
+data:
+  default.conf: |
+    server {
+        listen 80 default_server;
+        server_name _;
+        location / {
+            default_type text/plain;
+            add_header Cache-Control "no-store";
+            return 404 "404 page not found\n";
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: travel-gone
+  namespace: tool4speak
+  labels:
+    app: travel-gone
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: travel-gone
+  template:
+    metadata:
+      labels:
+        app: travel-gone
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+      volumes:
+        - name: conf
+          configMap:
+            name: travel-gone-nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: travel-gone
+  namespace: tool4speak
+  labels:
+    app: travel-gone
+spec:
+  selector:
+    app: travel-gone
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: travel-gone
+  namespace: tool4speak
+  labels:
+    app: travel-gone
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # Beat Tool4Speak Prefix "/" so /travel is not SPA-fallback.
+    traefik.ingress.kubernetes.io/router.priority: "90"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4speak.com
+      http:
+        paths:
+          - path: /travel
+            pathType: Prefix
+            backend:
+              service:
+                name: travel-gone
+                port:
+                  number: 80
+    - host: www.tool4speak.com
+      http:
+        paths:
+          - path: /travel
+            pathType: Prefix
+            backend:
+              service:
+                name: travel-gone
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - tool4speak.com
+        - www.tool4speak.com
+      secretName: tool4speak-tls
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: travel-gone-http
+  namespace: tool4speak
+  labels:
+    app: travel-gone
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.priority: "90"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4speak.com
+      http:
+        paths:
+          - path: /travel
+            pathType: Prefix
+            backend:
+              service:
+                name: travel-gone
+                port:
+                  number: 80
+    - host: www.tool4speak.com
+      http:
+        paths:
+          - path: /travel
+            pathType: Prefix
+            backend:
+              service:
+                name: travel-gone
+                port:
+                  number: 80

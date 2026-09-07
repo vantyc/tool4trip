@@ -236,7 +236,12 @@ export type TravelOptionStatus =
 
 export type VerificationStatus = 'verified' | 'estimated' | 'unverified'
 
-export type TravelOptionSourceType = 'cursor' | 'manual' | 'imported' | 'other'
+export type TravelOptionSourceType =
+  | 'cursor'
+  | 'manual'
+  | 'imported'
+  | 'agent'
+  | 'other'
 
 /**
  * Lightweight researched option. Never treat researched/shortlisted/selected

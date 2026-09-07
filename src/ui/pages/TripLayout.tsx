@@ -34,7 +34,7 @@ export function TripLayout() {
     <div className="trip-layout">
       <header className="trip-header">
         <Link to="/" className="back">
-          ← Viajes
+          ← Tool4Trip
         </Link>
         <h1>{trip.title}</h1>
         <p className="muted">
@@ -54,6 +54,7 @@ export function TripLayout() {
           Resumen
         </NavLink>
         <NavLink to={`/trips/${tripId}/options`}>Opciones</NavLink>
+        <NavLink to={`/ask?tripId=${tripId}`}>Ask Travel</NavLink>
         <NavLink to={`/trips/${tripId}/bookings`}>Reservas</NavLink>
         <NavLink to={`/trips/${tripId}/itinerary`}>Itinerario</NavLink>
         <NavLink to={`/trips/${tripId}/checklist`}>Checklist</NavLink>

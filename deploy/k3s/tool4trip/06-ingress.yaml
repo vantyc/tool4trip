@@ -1,0 +1,201 @@
+# Public auth routes — no ForwardAuth.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tool4trip-auth-public
+  namespace: tool4trip
+  labels:
+    app: tool4trip-auth
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4trip.com
+      http:
+        paths:
+          - path: /login
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-auth
+                port:
+                  number: 8080
+          - path: /api/login
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-auth
+                port:
+                  number: 8080
+          - path: /logout
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-auth
+                port:
+                  number: 8080
+          - path: /api/logout
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-auth
+                port:
+                  number: 8080
+    - host: www.tool4trip.com
+      http:
+        paths:
+          - path: /login
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-auth
+                port:
+                  number: 8080
+          - path: /api/login
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-auth
+                port:
+                  number: 8080
+          - path: /logout
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-auth
+                port:
+                  number: 8080
+          - path: /api/logout
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-auth
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - tool4trip.com
+        - www.tool4trip.com
+      secretName: tool4trip-tls
+---
+# travel-agent API (ForwardAuth)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tool4trip-agent
+  namespace: tool4trip
+  labels:
+    app: travel-agent
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: tool4trip-tool4trip-forwardauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "80"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4trip.com
+      http:
+        paths:
+          - path: /api/agent
+            pathType: Prefix
+            backend:
+              service:
+                name: travel-agent
+                port:
+                  number: 8080
+    - host: www.tool4trip.com
+      http:
+        paths:
+          - path: /api/agent
+            pathType: Prefix
+            backend:
+              service:
+                name: travel-agent
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - tool4trip.com
+        - www.tool4trip.com
+      secretName: tool4trip-tls
+---
+# Protected PWA at /
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tool4trip-web
+  namespace: tool4trip
+  labels:
+    app: tool4trip-web
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: tool4trip-tool4trip-forwardauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "50"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4trip.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80
+    - host: www.tool4trip.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - tool4trip.com
+        - www.tool4trip.com
+      secretName: tool4trip-tls
+---
+# HTTP → HTTPS
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tool4trip-web-http
+  namespace: tool4trip
+  labels:
+    app: tool4trip-web
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: tool4trip-redirect-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4trip.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80
+    - host: www.tool4trip.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80

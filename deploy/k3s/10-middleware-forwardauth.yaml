@@ -1,0 +1,20 @@
+# Traefik ForwardAuth → viajes-auth.
+# Do NOT attach to viajes-web Ingress until cutover (see 10-CUTOVER-SESSION-AUTH.md).
+#
+# After cutover, Ingress annotation:
+#   traefik.ingress.kubernetes.io/router.middlewares: viajes-viajes-forwardauth@kubernetescrd
+#
+# Public login paths must use a separate Ingress WITHOUT this middleware
+# (see 09-auth-ingress-public.yaml).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: viajes-forwardauth
+  namespace: viajes
+  labels:
+    app: viajes-auth
+spec:
+  forwardAuth:
+    address: http://viajes-auth.viajes.svc.cluster.local:8080/_auth/verify
+    authResponseHeaders:
+      - X-Viajes-User

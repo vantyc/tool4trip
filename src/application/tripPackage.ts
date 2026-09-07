@@ -57,7 +57,7 @@ const packageOptionStatus = z.enum(PACKAGE_OPTION_STATUSES)
 
 const verificationStatus = z.enum(['verified', 'estimated', 'unverified'])
 
-const sourceType = z.enum(['cursor', 'manual', 'imported', 'other'])
+const sourceType = z.enum(['cursor', 'manual', 'imported', 'agent', 'other'])
 
 const importance = z.enum(['crucial', 'recommended', 'optional'])
 

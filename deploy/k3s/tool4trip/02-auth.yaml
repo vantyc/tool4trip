@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool4trip-auth
+  namespace: tool4trip
+  labels:
+    app: tool4trip-auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tool4trip-auth
+  template:
+    metadata:
+      labels:
+        app: tool4trip-auth
+    spec:
+      imagePullSecrets:
+        - name: ghcr-registry
+      containers:
+        - name: tool4trip-auth
+          image: ghcr.io/vantyc/viajes-auth:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: tool4trip-session-auth
+                  key: AUTH_USERNAME
+            - name: AUTH_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: tool4trip-session-auth
+                  key: AUTH_PASSWORD_HASH
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tool4trip-session-auth
+                  key: SESSION_SECRET
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tool4trip-auth
+  namespace: tool4trip
+  labels:
+    app: tool4trip-auth
+spec:
+  selector:
+    app: tool4trip-auth
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

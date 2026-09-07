@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { db } from '../data/db'
 import { ConnectionIndicator } from '../ui/ConnectionIndicator'
+import { AskTravelPage } from '../ui/pages/AskTravelPage'
 import { BookingsPage } from '../ui/pages/BookingsPage'
 import { ChecklistPage } from '../ui/pages/ChecklistPage'
 import { DocumentsPage } from '../ui/pages/DocumentsPage'
@@ -58,7 +59,7 @@ export function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="app-header-top">
-          <p className="brand">Viajes</p>
+          <p className="brand">Tool4Trip</p>
           <ConnectionIndicator />
         </div>
         <p className="tagline">Fuente operativa de tu viaje</p>
@@ -67,6 +68,7 @@ export function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<TripListPage />} />
+          <Route path="/ask" element={<AskTravelPage />} />
           <Route path="/import" element={<ImportResearchPage />} />
           <Route path="/trips/:tripId" element={<TripLayout />}>
             <Route index element={<TripOverviewPage />} />
