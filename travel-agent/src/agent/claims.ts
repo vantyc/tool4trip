@@ -461,6 +461,72 @@ function resolveContextField(
   }
 }
 
+/** User asked for flights on a concrete calendar day (not "in September" generally). */
+export function isDaySpecificFlightAsk(prompt: string): boolean {
+  const p = prompt
+    .normalize('NFKC')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+  if (!/\bvuelo|\bvuelos|\bflight|\bflights\b/.test(p)) return false
+  // day + month, or ISO date, or "este 15 de septiembre"
+  return (
+    /\b\d{1,2}\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/.test(
+      p,
+    ) ||
+    /\b\d{4}-\d{2}-\d{2}\b/.test(p) ||
+    /\bel\s+\d{1,2}\b/.test(p) ||
+    /\beste\s+\d{1,2}\b/.test(p)
+  )
+}
+
+/** Aggregate route frequency — does not answer a day-specific flight ask. */
+export function isAggregateFlightFrequencyText(text: string): boolean {
+  const t = text
+    .normalize('NFKC')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+  if (!/\bvuelo|\bvuelos|\bflight|\bflights\b/.test(t)) return false
+  return (
+    /por\s+semana|a\s+la\s+semana|semanales|weekly/.test(t) ||
+    /por\s+mes|al\s+mes|mensuales|monthly/.test(t) ||
+    /por\s+ano|al\s+ano|anuales|yearly|per\s+year/.test(t) ||
+    /\d+\s+vuelos\s+(por|a\s+la)\s+(semana|mes|ano)/.test(t)
+  )
+}
+
+/**
+ * Drop claims that answer a day-specific flight ask with weekly/monthly aggregates.
+ * Soft-omit (do not fail the whole proposal) — wrong stats must not surface as evidence.
+ */
+export function filterAggregateFlightClaims(
+  claims: AgentClaimDraft[],
+  userPrompt: string | undefined,
+): { kept: AgentClaimDraft[]; warnings: string[] } {
+  if (!userPrompt || !isDaySpecificFlightAsk(userPrompt)) {
+    return { kept: claims, warnings: [] }
+  }
+  const kept: AgentClaimDraft[] = []
+  const warnings: string[] = []
+  for (const c of claims) {
+    const blob = `${c.statement} ${c.quotedFact}`
+    if (isAggregateFlightFrequencyText(blob)) {
+      warnings.push(
+        `server: omitido agregado temporal (no responde a la fecha pedida): ${c.statement}`,
+      )
+      continue
+    }
+    kept.push(c)
+  }
+  if (warnings.length > 0 && kept.length === 0) {
+    warnings.push(
+      'server: no hay evidencia de vuelos/horarios para la fecha pedida en las fuentes consultadas.',
+    )
+  }
+  return { kept, warnings }
+}
+
 /**
  * Attach server-owned evidence, then validate statement against that literal text.
  */
@@ -1050,7 +1116,7 @@ export function assertDraftGrounded(
   draftIn: Record<string, unknown>,
   toolTrace: ToolTraceEntry[],
   context?: import('../../shared/agentContracts.ts').TripContextSnapshot,
-  opts?: { allowSkeletonPackage?: boolean },
+  opts?: { allowSkeletonPackage?: boolean; userPrompt?: string },
 ): GroundingResult {
   const draft = structuredClone(draftIn) as Record<string, unknown>
   const rawClaims = draft.claims
@@ -1102,7 +1168,7 @@ export function assertDraftGrounded(
     }
   }
 
-  const { valid, invalid } = validateClaimsAgainstToolTrace(
+  const { valid: validated, invalid } = validateClaimsAgainstToolTrace(
     llmClaims,
     toolTrace,
     context,
@@ -1122,6 +1188,10 @@ export function assertDraftGrounded(
     }
   }
 
+  const filtered = filterAggregateFlightClaims(validated, opts?.userPrompt)
+  const valid = filtered.kept
+  const aggregateWarnings = filtered.warnings
+
   // Context-only read answers: Dexie/history is INPUT, not agent-authored output.
   // Do not rewrite package from claims, inject evidencia warnings, or residual-scan
   // echoed trip notes / options that were never part of this answer.
@@ -1134,7 +1204,7 @@ export function assertDraftGrounded(
     return {
       ok: true,
       validClaims: valid,
-      serverWarnings: [],
+      serverWarnings: aggregateWarnings,
       draft,
     }
   }
@@ -1147,7 +1217,7 @@ export function assertDraftGrounded(
     return {
       ok: true,
       validClaims: valid,
-      serverWarnings: [],
+      serverWarnings: aggregateWarnings,
       draft,
     }
   }
@@ -1156,6 +1226,7 @@ export function assertDraftGrounded(
     draft,
     valid,
   )
+  const allServerWarnings = [...aggregateWarnings, ...serverWarnings]
 
   const signals = collectAllOperationalSignals(rewritten)
   const uncovered = signals.filter((sig) => {
@@ -1177,10 +1248,20 @@ export function assertDraftGrounded(
     }
   }
 
+  // Surface honest "no day-specific evidence" warnings in the proposal UI.
+  if (allServerWarnings.length) {
+    const prev = Array.isArray(rewritten.warnings)
+      ? (rewritten.warnings as unknown[]).filter(
+          (w): w is string => typeof w === 'string',
+        )
+      : []
+    rewritten.warnings = [...prev, ...allServerWarnings]
+  }
+
   return {
     ok: true,
     validClaims: valid,
-    serverWarnings,
+    serverWarnings: allServerWarnings,
     draft: rewritten,
   }
 }

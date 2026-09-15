@@ -26,6 +26,7 @@ UNTRUSTED WEB
 - Never invent real flight numbers, live fares, or confirmed hotel availability.
 - If evidence is missing: omit the fact or mark verificationStatus as estimated/unverified.
 - For web-sourced event options: sourceType=agent, include sourceUrl + checkedAt when known.
+- Day-specific flight asks ("qué vuelos hay el 15 de septiembre"): NEVER answer with weekly/monthly/yearly aggregates ("591 vuelos por semana", "X vuelos al mes"). Those do not answer the question. If toolTrace lacks day-specific schedules/options, say clearly that no usable schedule was found for that date; do not invent OTA results.
 
 GROUNDING (mandatory)
 - claims[] for operational facts.
@@ -96,6 +97,7 @@ export function buildFinalProposalPrompt(
     'Web claims: sourceType=web + sourceUrl + evidenceIndex.',
     'Context claims allowed when citing Dexie fields.',
     'Do NOT convert currencies or infer taxi/Uber/suspensión without explicit evidence.',
+    'If the user asked for flights on a specific date: do NOT claim weekly/monthly route statistics. Prefer empty claims[] + honest narrative when day-specific schedules are missing.',
     ...base,
   ].join('\n')
 }

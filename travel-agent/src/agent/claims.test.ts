@@ -5,6 +5,8 @@ import { agentProposalSchema } from '../../shared/agentContracts.ts'
 import {
   assertDraftGrounded,
   deriveEvidenceFromSource,
+  filterAggregateFlightClaims,
+  isDaySpecificFlightAsk,
   resolveClaimEvidence,
   scrubOperationalFreeText,
   validateClaimsAgainstToolTrace,
@@ -523,5 +525,101 @@ describe('context entity id vs externalId', () => {
     )
     assert.equal(result.invalid.length, 0, JSON.stringify(result.invalid))
     assert.equal(result.valid.length, 1)
+  })
+})
+
+describe('day-specific flight ask vs weekly aggregate', () => {
+  it('detects day-specific flight prompts', () => {
+    assert.equal(
+      isDaySpecificFlightAsk(
+        'que vuelos hay desde cdmx a guadalajara este 15 de septiembre de 2026',
+      ),
+      true,
+    )
+    assert.equal(isDaySpecificFlightAsk('opciones de hospedaje en GDL'), false)
+  })
+
+  it('drops weekly aggregate claims for day-specific asks', () => {
+    const prompt =
+      'que vuelos hay desde cdmx a guadalajara este 15 de septiembre de 2026'
+    const filtered = filterAggregateFlightClaims(
+      [
+        {
+          kind: 'other_factual',
+          statement:
+            'Hay 591 vuelos por semana de Ciudad de México a Guadalajara en septiembre de 2026',
+          sourceType: 'web',
+          sourceUrl: 'https://example.com/cdmx-gdl',
+          evidenceIndex: 0,
+          sourceTitle: 'CDMX-GDL',
+          quotedFact:
+            'Hay 591 vuelos por semana de Ciudad de México a Guadalajara en septiembre.',
+          verificationStatus: 'verified',
+          confidence: 'high',
+        },
+      ],
+      prompt,
+    )
+    assert.equal(filtered.kept.length, 0)
+    assert.ok(filtered.warnings.some((w) => /omitido agregado/i.test(w)))
+    assert.ok(filtered.warnings.some((w) => /fecha pedida/i.test(w)))
+
+    const draft = baseDraft({
+      claims: [
+        {
+          kind: 'other_factual',
+          statement:
+            'Hay 591 vuelos por semana de Ciudad de México a Guadalajara',
+          sourceType: 'web',
+          sourceUrl: 'https://example.com/cdmx-gdl',
+          evidenceIndex: 0,
+          verificationStatus: 'verified',
+          confidence: 'high',
+        },
+      ],
+      package: {
+        schemaVersion: 1,
+        packageId: 'pkg-1',
+        revision: 1,
+        trip: {
+          id: 'trip-1',
+          title: 'SMA',
+          startDate: '2026-09-15',
+          endDate: '2026-09-16',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        travelOptions: [],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+      },
+    })
+    const trace: ToolTraceEntry[] = [
+      {
+        tool: 'webSearch',
+        ok: true,
+        sources: [
+          {
+            url: 'https://example.com/cdmx-gdl',
+            title: 'CDMX-GDL',
+            snippet:
+              'Hay 591 vuelos por semana de Ciudad de México a Guadalajara.',
+          },
+        ],
+        checkedAt: '2026-09-07T00:00:00+00:00',
+      },
+    ]
+    const g = assertDraftGrounded(draft, trace, undefined, {
+      userPrompt: prompt,
+    })
+    assert.equal(g.ok, true, g.ok ? '' : g.message)
+    if (!g.ok) throw new Error('expected ok')
+    assert.equal(g.validClaims.length, 0)
+    const warnings = (g.draft.warnings as string[]).join('\n')
+    assert.match(warnings, /omitido agregado/)
+    assert.match(warnings, /fecha pedida/)
+    assert.doesNotMatch(warnings, /server: evidencia \(other_factual\): Hay 591/)
   })
 })

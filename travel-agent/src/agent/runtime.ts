@@ -245,6 +245,7 @@ function tryParseProposal(
     const draft = asRecord(stripNulls(raw))
     const grounding = assertDraftGrounded(draft, toolTrace, req.context, {
       allowSkeletonPackage: intent === 'new_travel' || req.mode === 'new_travel',
+      userPrompt: req.prompt,
     })
     if (!grounding.ok) {
       const detail = [grounding.message, ...grounding.warnings].join('\n')
@@ -391,7 +392,9 @@ export async function runAgentAsk(
       const hit = tryContextAnswer(req)
       if (hit) {
         const draft = buildContextOnlyDraft(req, hit)
-        const grounding = assertDraftGrounded(draft, toolTrace, req.context)
+        const grounding = assertDraftGrounded(draft, toolTrace, req.context, {
+          userPrompt: req.prompt,
+        })
         if (!grounding.ok) {
           throw new AgentRuntimeError(
             [grounding.message, ...grounding.warnings].join('\n'),
