@@ -437,6 +437,19 @@ describe('AgentRuntime', () => {
     )
   })
 
+  it('7b: empty packageId from model falls back to agent-{tripId}', () => {
+    const draft = JSON.parse(validDraftJson('n'))
+    draft.package.packageId = ''
+    const req = sampleRequest('que vuelos hay')
+    // No packageImports in context → fallback agent-{tripId}
+    req.context.packageImports = []
+    const hydrated = hydrateProposal(draft, req, []) as {
+      package: { packageId: string }
+    }
+    assert.equal(hydrated.package.packageId, `agent-${req.tripId}`)
+    assert.ok(hydrated.package.packageId.length >= 1)
+  })
+
   it('A: mock LLM → webSearch → structured final', async () => {
     const registry = new ToolRegistry()
     registry.register({

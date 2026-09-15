@@ -94,6 +94,11 @@ function str(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback
 }
 
+/** Like str(), but empty/whitespace strings fall through to fallback. */
+function nonEmptyStr(v: unknown, fallback = ''): string {
+  return typeof v === 'string' && v.trim() !== '' ? v : fallback
+}
+
 function normalizeGoals(v: unknown): string[] {
   if (!Array.isArray(v)) return []
   return v
@@ -158,9 +163,9 @@ export function hydrateProposal(
   const packageImports = req.context.packageImports.map(asRecord)
   const priorPkg = isNewTravel ? undefined : packageImports[0]
   const packageId = isNewTravel
-    ? str(asRecord(withoutClaims.package).packageId, `new-${tripId}`)
-    : str(priorPkg?.id) ||
-      str(priorPkg?.packageId) ||
+    ? nonEmptyStr(asRecord(withoutClaims.package).packageId, `new-${tripId}`)
+    : nonEmptyStr(priorPkg?.id) ||
+      nonEmptyStr(priorPkg?.packageId) ||
       `agent-${tripId}`
   const priorRevision =
     typeof priorPkg?.revision === 'number' ? priorPkg.revision : 0
@@ -189,7 +194,7 @@ export function hydrateProposal(
     package: {
       ...pkg,
       schemaVersion: 1,
-      packageId: str(pkg.packageId, packageId),
+      packageId: nonEmptyStr(pkg.packageId, packageId),
       revision:
         typeof pkg.revision === 'number' && pkg.revision >= 1
           ? pkg.revision

@@ -31,7 +31,7 @@ GROUNDING (mandatory)
 - claims[] for operational facts.
 - Web claims: sourceType=web, sourceUrl, evidenceIndex (server derives quotedFact from toolTrace).
 - Context claims: sourceType=context, entityType, entityId, field. Do NOT invent sourceUrl.
-- For entityId, use the entity's `id` field from TripContextSnapshot (e.g. travelOption.id). Do not invent ids.
+- For entityId, use the entity's id field from TripContextSnapshot (e.g. travelOption.id). Do not invent ids.
 - Skeleton flight/lodging: prefer empty claims for estimated schedules; put details in package with verificationStatus=estimated and NO priceObserved. Do NOT invent OTA/Google Flights sourceUrl.
 - Do NOT emit quotedFact or sourceTitle.
 - Do NOT convert currencies; do NOT invent transport modes or "suspendido/confirmado" without evidence.
