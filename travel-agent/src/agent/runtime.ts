@@ -110,6 +110,208 @@ function normalizeGoals(v: unknown): string[] {
     .filter(Boolean)
 }
 
+const EXTERNAL_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
+const TRAVEL_OPTION_TYPES = new Set([
+  'flight',
+  'lodging',
+  'bus',
+  'train',
+  'transfer',
+  'car_rental',
+  'restaurant',
+  'activity',
+  'event',
+  'other',
+])
+
+function slugId(prefix: string, seed: string, index: number): string {
+  const base = seed
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+  return `${prefix}-${base || 'item'}-${index + 1}`
+}
+
+function ensureExternalId(
+  raw: unknown,
+  prefix: string,
+  seed: string,
+  index: number,
+  seen: Set<string>,
+): string {
+  let id = nonEmptyStr(raw)
+  if (!EXTERNAL_ID_RE.test(id)) id = slugId(prefix, seed, index)
+  if (seen.has(id)) id = `${id.replace(/-\d+$/, '')}-${index + 1}`
+  if (seen.has(id) || !EXTERNAL_ID_RE.test(id)) {
+    id = `${prefix}-item-${index + 1}-${seen.size + 1}`
+  }
+  seen.add(id)
+  return id
+}
+
+function optionalIso(v: unknown): string | undefined {
+  const s = nonEmptyStr(v)
+  return s || undefined
+}
+
+/** Drop/fill incomplete package entities so Zod proposal schema always passes. */
+export function sanitizePackageCollections(pkg: Record<string, unknown>): {
+  travelOptions: Record<string, unknown>[]
+  itineraryItems: Record<string, unknown>[]
+  checklistItems: Record<string, unknown>[]
+  notes: Record<string, unknown>[]
+} {
+  const travelOptions: Record<string, unknown>[] = []
+  const seenOpt = new Set<string>()
+  const rawOpts = Array.isArray(pkg.travelOptions) ? pkg.travelOptions : []
+  for (let i = 0; i < rawOpts.length; i++) {
+    const r = asRecord(rawOpts[i])
+    const title = nonEmptyStr(r.title)
+    if (!title) continue
+    const typeRaw = nonEmptyStr(r.type, 'other')
+    const type = TRAVEL_OPTION_TYPES.has(typeRaw) ? typeRaw : 'other'
+    const externalId = ensureExternalId(r.externalId, 'opt', title, i, seenOpt)
+    const statusRaw = nonEmptyStr(r.status, 'researched')
+    const status =
+      statusRaw === 'researched' || statusRaw === 'shortlisted'
+        ? statusRaw
+        : 'researched'
+    const priceObserved =
+      typeof r.priceObserved === 'number' &&
+      Number.isFinite(r.priceObserved) &&
+      r.priceObserved >= 0
+        ? r.priceObserved
+        : undefined
+    const currency = nonEmptyStr(r.currency).toUpperCase()
+    const currencyOk = /^[A-Z]{3}$/.test(currency) ? currency : undefined
+    const sourceTypeRaw = nonEmptyStr(r.sourceType, 'agent')
+    const sourceType =
+      sourceTypeRaw === 'cursor' ||
+      sourceTypeRaw === 'manual' ||
+      sourceTypeRaw === 'imported' ||
+      sourceTypeRaw === 'agent' ||
+      sourceTypeRaw === 'other'
+        ? sourceTypeRaw
+        : 'agent'
+    const out: Record<string, unknown> = {
+      externalId,
+      type,
+      title,
+      status,
+      sourceType,
+    }
+    const provider = nonEmptyStr(r.provider)
+    if (provider) out.provider = provider
+    const description = nonEmptyStr(r.description)
+    if (description) out.description = description
+    const startAt = optionalIso(r.startAt)
+    if (startAt) out.startAt = startAt
+    const endAt = optionalIso(r.endAt)
+    if (endAt) out.endAt = endAt
+    const origin = nonEmptyStr(r.origin)
+    if (origin) out.origin = origin
+    const destination = nonEmptyStr(r.destination)
+    if (destination) out.destination = destination
+    const address = nonEmptyStr(r.address)
+    if (address) out.address = address
+    const phone = nonEmptyStr(r.phone)
+    if (phone) out.phone = phone
+    if (priceObserved !== undefined && currencyOk) {
+      out.priceObserved = priceObserved
+      out.currency = currencyOk
+    }
+    const sourceUrl = nonEmptyStr(r.sourceUrl)
+    if (sourceUrl && /^https?:\/\//i.test(sourceUrl)) out.sourceUrl = sourceUrl
+    const checkedAt = optionalIso(r.checkedAt)
+    if (checkedAt) out.checkedAt = checkedAt
+    const verificationStatus = nonEmptyStr(r.verificationStatus)
+    if (
+      verificationStatus === 'verified' ||
+      verificationStatus === 'estimated' ||
+      verificationStatus === 'unverified'
+    ) {
+      out.verificationStatus = verificationStatus
+    }
+    const notes = nonEmptyStr(r.notes)
+    if (notes) out.notes = notes
+    travelOptions.push(out)
+  }
+
+  const itineraryItems: Record<string, unknown>[] = []
+  const seenItin = new Set<string>()
+  const rawItin = Array.isArray(pkg.itineraryItems) ? pkg.itineraryItems : []
+  for (let i = 0; i < rawItin.length; i++) {
+    const r = asRecord(rawItin[i])
+    // Soft-drop empty shells — keep items that at least have a title or timing.
+    const title = nonEmptyStr(r.title)
+    const startAt = optionalIso(r.startAt)
+    const endAt = optionalIso(r.endAt)
+    const place = nonEmptyStr(r.place)
+    if (!title && !startAt && !endAt && !place) continue
+    const resolvedTitle = title || place || 'Ítem de itinerario'
+    const externalId = ensureExternalId(
+      r.externalId,
+      'itin',
+      resolvedTitle,
+      i,
+      seenItin,
+    )
+    const importanceRaw = nonEmptyStr(r.importance, 'optional')
+    const importance =
+      importanceRaw === 'crucial' ||
+      importanceRaw === 'recommended' ||
+      importanceRaw === 'optional'
+        ? importanceRaw
+        : 'optional'
+    const out: Record<string, unknown> = {
+      externalId,
+      title: resolvedTitle,
+      importance,
+    }
+    if (startAt) out.startAt = startAt
+    if (endAt) out.endAt = endAt
+    if (place) out.place = place
+    const notes = nonEmptyStr(r.notes)
+    if (notes) out.notes = notes
+    itineraryItems.push(out)
+  }
+
+  const checklistItems: Record<string, unknown>[] = []
+  const seenChk = new Set<string>()
+  const rawChk = Array.isArray(pkg.checklistItems) ? pkg.checklistItems : []
+  for (let i = 0; i < rawChk.length; i++) {
+    const r = asRecord(rawChk[i])
+    // LLMs sometimes put checklist text in title/text instead of label.
+    const label = nonEmptyStr(r.label, nonEmptyStr(r.title, nonEmptyStr(r.text)))
+    if (!label) continue
+    const externalId = ensureExternalId(r.externalId, 'chk', label, i, seenChk)
+    const out: Record<string, unknown> = { externalId, label }
+    const dueAt = optionalIso(r.dueAt)
+    if (dueAt) out.dueAt = dueAt
+    if (typeof r.sortOrder === 'number' && Number.isFinite(r.sortOrder) && r.sortOrder >= 0) {
+      out.sortOrder = Math.floor(r.sortOrder)
+    }
+    checklistItems.push(out)
+  }
+
+  const notes: Record<string, unknown>[] = []
+  const seenNote = new Set<string>()
+  const rawNotes = Array.isArray(pkg.notes) ? pkg.notes : []
+  for (let i = 0; i < rawNotes.length; i++) {
+    const r = asRecord(rawNotes[i])
+    const body = nonEmptyStr(r.body)
+    if (!body) continue
+    const externalId = ensureExternalId(r.externalId, 'note', body, i, seenNote)
+    const out: Record<string, unknown> = { externalId, body }
+    const noteTitle = nonEmptyStr(r.title)
+    if (noteTitle) out.title = noteTitle
+    notes.push(out)
+  }
+
+  return { travelOptions, itineraryItems, checklistItems, notes }
+}
+
 function stripNulls(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(stripNulls)
   if (v && typeof v === 'object') {
@@ -177,6 +379,7 @@ export function hydrateProposal(
   if (isNewTravel) {
     pkg = enrichPackageWithAirportArrivals(pkg)
   }
+  const collections = sanitizePackageCollections(pkg)
   const pkgTrip = asRecord(pkg.trip)
 
   const modelWarnings = Array.isArray(withoutClaims.warnings)
@@ -222,10 +425,10 @@ export function hydrateProposal(
               ? undefined
               : str(trip.notes) || undefined,
       },
-      travelOptions: Array.isArray(pkg.travelOptions) ? pkg.travelOptions : [],
-      itineraryItems: Array.isArray(pkg.itineraryItems) ? pkg.itineraryItems : [],
-      checklistItems: Array.isArray(pkg.checklistItems) ? pkg.checklistItems : [],
-      notes: Array.isArray(pkg.notes) ? pkg.notes : [],
+      travelOptions: collections.travelOptions,
+      itineraryItems: collections.itineraryItems,
+      checklistItems: collections.checklistItems,
+      notes: collections.notes,
     },
   }
 }
