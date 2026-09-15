@@ -429,10 +429,15 @@ function resolveContextField(
       message: `unknown entityType ${entityType}`,
     }
   }
+  // Match primary entity id OR package externalId — LLMs often cite either.
+  // Preferring only externalId broke grounding after cloud SoT (ids look like
+  // opt-{packageId}-{externalId} while externalId stays short).
   const hit = list.find((item) => {
+    if (entityId == null) return false
     const r = item as Record<string, unknown>
-    const id = String(r.externalId ?? r.id ?? '')
-    return entityId != null && id === entityId
+    const primary = r.id != null ? String(r.id) : ''
+    const external = r.externalId != null ? String(r.externalId) : ''
+    return entityId === primary || entityId === external
   }) as Record<string, unknown> | undefined
   if (!hit) {
     return {

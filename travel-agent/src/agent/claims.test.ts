@@ -459,3 +459,69 @@ describe('claims as single source of truth', () => {
       proposal.package.travelOptions[0]?.priceObserved === 1)
   })
 })
+
+describe('context entity id vs externalId', () => {
+  const packageId = 'e7b872d0-2446-477a-8282-bc988d350bdc'
+  const fullId = `opt-${packageId}-flight-outbound-1`
+  const context = {
+    trip: { id: 'trip-1', title: 'Guanatos' },
+    bookings: [],
+    travelOptions: [
+      {
+        id: fullId,
+        tripId: 'trip-1',
+        type: 'flight',
+        status: 'researched',
+        title: 'CDMX → GDL',
+        externalId: 'flight-outbound-1',
+        packageId,
+      },
+    ],
+    itineraryItems: [],
+    checklistItems: [],
+    notes: [],
+    packageImports: [],
+  }
+
+  it('grounds when claim cites primary id (not short externalId)', () => {
+    const result = validateClaimsAgainstToolTrace(
+      [
+        {
+          kind: 'fact',
+          statement: 'CDMX → GDL',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: fullId,
+          field: 'title',
+          verificationStatus: 'unverified',
+          confidence: 'high',
+        },
+      ],
+      [],
+      context,
+    )
+    assert.equal(result.invalid.length, 0, JSON.stringify(result.invalid))
+    assert.equal(result.valid.length, 1)
+  })
+
+  it('still grounds when claim cites short externalId', () => {
+    const result = validateClaimsAgainstToolTrace(
+      [
+        {
+          kind: 'fact',
+          statement: 'CDMX → GDL',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'flight-outbound-1',
+          field: 'title',
+          verificationStatus: 'unverified',
+          confidence: 'high',
+        },
+      ],
+      [],
+      context,
+    )
+    assert.equal(result.invalid.length, 0, JSON.stringify(result.invalid))
+    assert.equal(result.valid.length, 1)
+  })
+})
