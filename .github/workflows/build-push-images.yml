@@ -1,0 +1,47 @@
+name: Build and push prod images
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/cloud-agent-1789495870419-r69zt
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: viajes
+            dockerfile: Dockerfile
+            context: .
+            image: ghcr.io/vantyc/viajes
+          - name: travel-agent
+            dockerfile: travel-agent/Dockerfile
+            context: .
+            image: ghcr.io/vantyc/travel-agent
+          - name: trip-api
+            dockerfile: trip-api/Dockerfile
+            context: .
+            image: ghcr.io/vantyc/trip-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:${{ github.sha }}
