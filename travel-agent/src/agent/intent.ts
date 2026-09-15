@@ -1,6 +1,10 @@
 import type { AgentAskRequest, TripContextSnapshot } from '../../shared/agentContracts.ts'
 
-export type AskIntent = 'context_answer' | 'research' | 'mutation'
+export type AskIntent =
+  | 'context_answer'
+  | 'research'
+  | 'mutation'
+  | 'new_travel'
 
 function norm(s: string): string {
   return s
@@ -16,8 +20,14 @@ function norm(s: string): string {
  * Heuristic intent routing (no extra LLM call).
  * Prefer research as default so tool loop remains available;
  * only force context_answer for clear trip-local questions.
+ * Explicit mode=new_travel from the UI always wins.
  */
-export function classifyAskIntent(prompt: string): AskIntent {
+export function classifyAskIntent(
+  prompt: string,
+  mode?: 'ask' | 'new_travel',
+): AskIntent {
+  if (mode === 'new_travel') return 'new_travel'
+
   const p = norm(prompt)
 
   if (

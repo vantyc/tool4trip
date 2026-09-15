@@ -47,6 +47,9 @@ export function TripListPage() {
         <button type="button" onClick={() => void handleSeed()} disabled={busy}>
           {busy ? 'Cargando…' : 'Cargar seed San Miguel (FICTICIO)'}
         </button>
+        <Link to="/new" className="sum-action">
+          Nuevo viaje
+        </Link>
         <Link to="/ask" className="sum-action">
           Ask Travel
         </Link>
@@ -58,7 +61,7 @@ export function TripListPage() {
       {message && <p className="flash">{message}</p>}
 
       {trips.length === 0 ? (
-        <p className="muted">No hay viajes. Carga el seed demo para empezar.</p>
+        <p className="muted">No hay viajes. Usa Nuevo viaje o carga el seed demo.</p>
       ) : (
         <ul className="trip-list">
           {trips.map((trip) => (

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { db } from '../data/db'
 import { ConnectionIndicator } from '../ui/ConnectionIndicator'
 import { AskTravelPage } from '../ui/pages/AskTravelPage'
+import { NewTravelPage } from '../ui/pages/NewTravelPage'
 import { BookingsPage } from '../ui/pages/BookingsPage'
 import { ChecklistPage } from '../ui/pages/ChecklistPage'
 import { DocumentsPage } from '../ui/pages/DocumentsPage'
@@ -73,6 +74,7 @@ export function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<TripListPage />} />
+          <Route path="/new" element={<NewTravelPage />} />
           <Route path="/ask" element={<AskTravelPage />} />
           <Route path="/import" element={<ImportResearchPage />} />
           <Route path="/trips/:tripId" element={<TripLayout />}>

@@ -22,6 +22,7 @@ import { ToolRegistry } from '../tools/registry.ts'
 import { buildUserMessage, registerTravelTools } from '../tools/travelTools.ts'
 import {
   buildFinalProposalPrompt,
+  buildNewTravelUserNudge,
   buildRepairPrompt,
   buildSystemPrompt,
 } from './prompts.ts'
@@ -31,6 +32,7 @@ import {
   classifyAskIntent,
   tryContextAnswer,
 } from './intent.ts'
+import { enrichPackageWithAirportArrivals } from './airportArrivalEnrich.ts'
 import { agentProposalStructuredResponseFormat } from './proposalSchema.ts'
 
 export type AgentRunMeta = {
@@ -121,28 +123,55 @@ export function hydrateProposal(
   raw: unknown,
   req: AgentAskRequest,
   toolTrace: ToolTraceEntry[],
-  opts?: { serverWarnings?: string[] },
+  opts?: { serverWarnings?: string[]; intent?: string },
 ): unknown {
   const obj = asRecord(stripNulls(raw))
   // claims[] is internal to AgentRuntime — never part of public AgentProposal
   const { claims: _claims, ...withoutClaims } = obj
+  const isNewTravel =
+    req.mode === 'new_travel' || opts?.intent === 'new_travel'
   const trip = asRecord(req.context.trip)
-  const tripId = str(trip.id, req.tripId)
-  const title = str(trip.title, 'Viaje')
-  const startDate = str(trip.startDate, '2026-01-01')
-  const endDate = str(trip.endDate, startDate)
-  const timezone = str(trip.timezone, 'America/Mexico_City')
+  const tripId = isNewTravel
+    ? str(asRecord(asRecord(withoutClaims.package).trip).id, req.tripId)
+    : str(trip.id, req.tripId)
+  const title = isNewTravel
+    ? str(asRecord(asRecord(withoutClaims.package).trip).title, 'Nuevo viaje')
+    : str(trip.title, 'Viaje')
+  const startDate = isNewTravel
+    ? str(
+        asRecord(asRecord(withoutClaims.package).trip).startDate,
+        '2026-01-01',
+      )
+    : str(trip.startDate, '2026-01-01')
+  const endDate = isNewTravel
+    ? str(
+        asRecord(asRecord(withoutClaims.package).trip).endDate,
+        startDate,
+      )
+    : str(trip.endDate, startDate)
+  const timezone = isNewTravel
+    ? str(
+        asRecord(asRecord(withoutClaims.package).trip).timezone,
+        'America/Mexico_City',
+      )
+    : str(trip.timezone, 'America/Mexico_City')
   const packageImports = req.context.packageImports.map(asRecord)
-  const priorPkg = packageImports[0]
-  const packageId =
-    str(priorPkg?.id) ||
-    str(priorPkg?.packageId) ||
-    `agent-${tripId}`
+  const priorPkg = isNewTravel ? undefined : packageImports[0]
+  const packageId = isNewTravel
+    ? str(asRecord(withoutClaims.package).packageId, `new-${tripId}`)
+    : str(priorPkg?.id) ||
+      str(priorPkg?.packageId) ||
+      `agent-${tripId}`
   const priorRevision =
     typeof priorPkg?.revision === 'number' ? priorPkg.revision : 0
-  const revision = Math.max(1, priorRevision + 1)
+  const revision = isNewTravel
+    ? 1
+    : Math.max(1, priorRevision + 1)
 
-  const pkg = asRecord(withoutClaims.package)
+  let pkg = asRecord(withoutClaims.package)
+  if (isNewTravel) {
+    pkg = enrichPackageWithAirportArrivals(pkg)
+  }
   const pkgTrip = asRecord(pkg.trip)
 
   const modelWarnings = Array.isArray(withoutClaims.warnings)
@@ -169,18 +198,24 @@ export function hydrateProposal(
       trip: {
         id: tripId,
         title: str(pkgTrip.title, title),
-        destination: str(pkgTrip.destination, str(trip.destination)),
+        destination: isNewTravel
+          ? str(pkgTrip.destination) || undefined
+          : str(pkgTrip.destination, str(trip.destination)),
         startDate: str(pkgTrip.startDate, startDate),
         endDate: str(pkgTrip.endDate, endDate),
         timezone: str(pkgTrip.timezone, timezone),
-        goals: normalizeGoals(pkgTrip.goals ?? trip.goals),
+        goals: normalizeGoals(
+          pkgTrip.goals ?? (isNewTravel ? [] : trip.goals),
+        ),
         status: str(pkgTrip.status, str(trip.status, 'planned')),
         // Explicit null/empty from a context-only draft must not re-echo Dexie notes
         // into the proposal package (those are INPUT CONTEXT, not agent output).
         notes:
           'notes' in pkgTrip
             ? str(pkgTrip.notes) || undefined
-            : str(trip.notes) || undefined,
+            : isNewTravel
+              ? undefined
+              : str(trip.notes) || undefined,
       },
       travelOptions: Array.isArray(pkg.travelOptions) ? pkg.travelOptions : [],
       itineraryItems: Array.isArray(pkg.itineraryItems) ? pkg.itineraryItems : [],
@@ -198,11 +233,14 @@ function tryParseProposal(
   text: string,
   req: AgentAskRequest,
   toolTrace: ToolTraceEntry[],
+  intent?: string,
 ): ParseProposalResult {
   try {
     const raw = extractJsonObject(text)
     const draft = asRecord(stripNulls(raw))
-    const grounding = assertDraftGrounded(draft, toolTrace, req.context)
+    const grounding = assertDraftGrounded(draft, toolTrace, req.context, {
+      allowSkeletonPackage: intent === 'new_travel' || req.mode === 'new_travel',
+    })
     if (!grounding.ok) {
       const detail = [grounding.message, ...grounding.warnings].join('\n')
       return {
@@ -213,8 +251,8 @@ function tryParseProposal(
       }
     }
     const hydrated = hydrateProposal(grounding.draft, req, toolTrace, {
-      // Operational server warnings already embedded by applyClaimsSourceOfTruth
       serverWarnings: [],
+      intent,
     })
     const parsed = agentProposalSchema.safeParse(hydrated)
     if (!parsed.success) {
@@ -334,12 +372,13 @@ export async function runAgentAsk(
   }
 
   try {
-    const intent = classifyAskIntent(req.prompt)
+    const intent = classifyAskIntent(req.prompt, req.mode)
     logJobEvent('ask_intent', {
       jobId: deps.jobId ?? null,
       requestId: deps.requestId ?? null,
       tripId: deps.tripId ?? req.tripId,
       intent,
+      mode: req.mode ?? 'ask',
     })
 
     // --- Context-only fast path: no tools, no web claims ---
@@ -393,7 +432,13 @@ export async function runAgentAsk(
       })
       // fall through to structured final (skip tool loop)
     } else {
-      // --- Tool loop (research / mutation) ---
+      if (intent === 'new_travel') {
+        messages.push({
+          role: 'user',
+          content: buildNewTravelUserNudge(req.tripId),
+        })
+      }
+      // --- Tool loop (research / mutation / new_travel events) ---
       while (steps < deps.cfg.maxSteps) {
         if (controller.signal.aborted) {
           throw new AgentRuntimeError('Agent timeout', 'llm_timeout', failMeta())
@@ -486,7 +531,7 @@ export async function runAgentAsk(
       )
     }
 
-    const first = tryParseProposal(finalText, req, toolTrace)
+    const first = tryParseProposal(finalText, req, toolTrace, intent)
     if (first.ok) {
       return {
         proposal: first.proposal,
@@ -527,7 +572,7 @@ export async function runAgentAsk(
     }
 
     const repairedText = repairResult.message.content?.trim() || ''
-    const second = tryParseProposal(repairedText, req, toolTrace)
+    const second = tryParseProposal(repairedText, req, toolTrace, intent)
     if (second.ok) {
       return {
         proposal: second.proposal,

@@ -14,6 +14,10 @@ import type {
 } from '../domain/types'
 import { newId, nowIso, touchTimestamps } from './ids'
 import {
+  enrichTripPackageAirportArrivals,
+  isAirportArrivalExternalId,
+} from './airportArrivalEnrich'
+import {
   USER_DECISION_STATUSES,
   checklistEntityId,
   itineraryEntityId,
@@ -23,6 +27,7 @@ import {
   type TripPackageV1,
   validateTripPackage,
 } from './tripPackage'
+import type { AbsoluteReminder } from '../domain/types'
 
 export class PackageValidationImportError extends Error {
   readonly errors: { path: string; message: string }[]
@@ -375,7 +380,7 @@ export function createPackageImportService(repos: Repositories) {
       if (!validated.ok) {
         throw new PackageValidationImportError(validated.errors)
       }
-      const pkg = validated.package
+      const pkg = enrichTripPackageAirportArrivals(validated.package)
 
       const existingImport = await repos.packageImports.getById(pkg.packageId)
       const tripId =
@@ -521,6 +526,37 @@ export function createPackageImportService(repos: Repositories) {
         })
       }
 
+      const remindersToWrite: AbsoluteReminder[] = []
+      for (const item of itineraryToWrite) {
+        const pkgItem = pkg.itineraryItems.find(
+          (i) => itineraryEntityId(pkg.packageId, i.externalId) === item.id,
+        )
+        if (
+          !pkgItem ||
+          !isAirportArrivalExternalId(pkgItem.externalId) ||
+          !item.startAt
+        ) {
+          continue
+        }
+        const remId = `rem-${item.id}`
+        const existingRem = await repos.reminders.getById(remId)
+        const triggerAt: string = item.startAt
+        const label: string =
+          existingRem?.label ?? item.title ?? 'Arribo al aeropuerto'
+        remindersToWrite.push({
+          id: remId,
+          tripId,
+          itineraryItemId: item.id,
+          label,
+          done: existingRem?.done ?? false,
+          kind: 'absolute',
+          triggerAt,
+          createdAt: existingRem?.createdAt ?? now,
+          updatedAt: now,
+          syncStatus: existingRem?.syncStatus ?? 'local',
+        })
+      }
+
       const importRecord: PackageImport = {
         id: pkg.packageId,
         tripId,
@@ -541,6 +577,7 @@ export function createPackageImportService(repos: Repositories) {
             db.itineraryItems,
             db.checklistItems,
             db.notes,
+            db.reminders,
             db.packageImports,
           ],
           async () => {
@@ -550,6 +587,7 @@ export function createPackageImportService(repos: Repositories) {
             for (const i of itineraryToWrite) await db.itineraryItems.put(i)
             for (const c of checklistToWrite) await db.checklistItems.put(c)
             for (const n of notesToWrite) await db.notes.put(n)
+            for (const r of remindersToWrite) await db.reminders.put(r)
             await db.packageImports.put(importRecord)
           },
         )

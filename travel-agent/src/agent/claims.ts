@@ -1045,6 +1045,7 @@ export function assertDraftGrounded(
   draftIn: Record<string, unknown>,
   toolTrace: ToolTraceEntry[],
   context?: import('../../shared/agentContracts.ts').TripContextSnapshot,
+  opts?: { allowSkeletonPackage?: boolean },
 ): GroundingResult {
   const draft = structuredClone(draftIn) as Record<string, unknown>
   const rawClaims = draft.claims
@@ -1124,6 +1125,19 @@ export function assertDraftGrounded(
     draft.diffSummary = Array.isArray(draft.diffSummary)
       ? draft.diffSummary
       : []
+    if (!Array.isArray(draft.ops)) draft.ops = []
+    return {
+      ok: true,
+      validClaims: valid,
+      serverWarnings: [],
+      draft,
+    }
+  }
+
+  // new_travel skeleton: web claims still fail-closed above; estimated
+  // flight/hotel package fields skip residual SoT scan.
+  if (opts?.allowSkeletonPackage) {
+    if (!Array.isArray(draft.warnings)) draft.warnings = []
     if (!Array.isArray(draft.ops)) draft.ops = []
     return {
       ok: true,
