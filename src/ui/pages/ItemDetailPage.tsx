@@ -1,4 +1,3 @@
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useParams } from 'react-router-dom'
 import { services } from '../../application'
 import { documentActionLabel } from '../../application/documents'
@@ -6,16 +5,20 @@ import { formatClockHm } from '../../application/summary'
 import type { DocumentMeta } from '../../domain/types'
 import { formatLocalFromIso } from '../format'
 import { useDocumentViewer } from '../documents/useDocumentViewer'
+import { useCloudQuery } from '../useCloudQuery'
+import { useLiveQuery } from 'dexie-react-hooks'
 
 export function ItemDetailPage() {
   const { tripId, itemId } = useParams<{ tripId: string; itemId: string }>()
   const { open, Viewer } = useDocumentViewer()
 
-  const resolved = useLiveQuery(async () => {
-    if (!tripId || !itemId) return null
-    const items = await services.itinerary.listResolvedByTrip(tripId)
-    return items.find((r) => r.item.id === itemId) ?? null
-  }, [tripId, itemId])
+  const { data: resolved, loading, error } = useCloudQuery(
+    tripId && itemId ? `item:${tripId}:${itemId}` : null,
+    async () => {
+      const items = await services.itinerary.listResolvedByTrip(tripId!)
+      return items.find((r) => r.item.id === itemId) ?? null
+    },
+  )
 
   const docs =
     useLiveQuery(async () => {
@@ -31,16 +34,19 @@ export function ItemDetailPage() {
       return [...map.values()]
     }, [tripId, itemId, resolved?.booking?.id]) ?? []
 
-  const reminders =
-    useLiveQuery(async () => {
-      if (!itemId || !tripId) return []
-      return services.reminders.listResolvedByTrip(tripId).then((list) =>
-        list.filter((r) => r.reminder.itineraryItemId === itemId),
-      )
-    }, [tripId, itemId]) ?? []
+  const { data: reminders = [] } = useCloudQuery(
+    tripId && itemId ? `rems:${tripId}:${itemId}` : null,
+    async () => {
+      const list = await services.reminders.listResolvedByTrip(tripId!)
+      return list.filter((r) => r.reminder.itineraryItemId === itemId)
+    },
+  )
 
-  if (resolved === undefined) {
+  if (loading || resolved === undefined) {
     return <p className="muted">Cargando…</p>
+  }
+  if (error) {
+    return <p className="status-bad">{error.message}</p>
   }
   if (!resolved || !tripId) {
     return (
@@ -79,19 +85,14 @@ export function ItemDetailPage() {
           <h3>Reserva</h3>
           <p className="entity-meta">
             {b.type} · {b.status}
+            {b.confirmationNumber ? ` · Loc ${b.confirmationNumber}` : ''}
           </p>
-          {b.confirmationNumber && (
-            <p className="entity-meta">Loc: {b.confirmationNumber}</p>
-          )}
-          {b.phone && (
-            <p>
-              <a href={`tel:${b.phone}`}>{b.phone}</a>
+          {(b.origin || b.destination) && (
+            <p className="entity-meta">
+              {b.origin ?? '—'} → {b.destination ?? '—'}
             </p>
           )}
-          {b.address && <p className="entity-meta">{b.address}</p>}
-          {b.instructions && (
-            <p className="note-block small">{b.instructions}</p>
-          )}
+          {b.notes && <p className="note-block small">{b.notes}</p>}
         </div>
       )}
 
@@ -104,8 +105,9 @@ export function ItemDetailPage() {
                 <div className="entity-title">{reminder.label}</div>
                 <div className="entity-meta">
                   {triggerAt
-                    ? `${formatClockHm(triggerAt)} · ${formatLocalFromIso(triggerAt)}`
-                    : '—'}
+                    ? `${formatLocalFromIso(triggerAt)} (${formatClockHm(triggerAt)})`
+                    : 'Sin hora resuelta'}
+                  {reminder.done ? ' · hecho' : ''}
                 </div>
               </li>
             ))}
@@ -130,7 +132,6 @@ export function ItemDetailPage() {
           </div>
         </div>
       )}
-
       {Viewer}
     </section>
   )

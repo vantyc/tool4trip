@@ -11,7 +11,7 @@ import type { ImportUpdatePlan } from './packageImport'
 import { enrichTripPackageAirportArrivals } from './airportArrivalEnrich'
 import { validateTripPackage } from './tripPackage'
 import { buildTripContextSnapshot } from './tripContextSnapshot'
-import { localRepositories } from '../data/repositories'
+import { httpRepositories } from '../data/repositories/httpRepositories'
 
 export type { AgentProposal }
 
@@ -114,7 +114,7 @@ export async function askTravelAgent(
   },
 ): Promise<AgentProposal> {
   const context = await buildTripContextSnapshot(
-    localRepositories,
+    httpRepositories,
     input.tripId,
   )
   const body: AgentAskRequest = agentAskRequestSchema.parse({
@@ -127,7 +127,7 @@ export async function askTravelAgent(
   return postAgentAsk(body, opts)
 }
 
-/** Empty Dexie snapshot shell for creating a brand-new trip. */
+/** Empty snapshot shell for creating a brand-new trip (cloud SoT). */
 function emptyNewTravelContext(tripId: string) {
   return {
     trip: {

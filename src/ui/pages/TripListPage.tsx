@@ -1,30 +1,55 @@
-import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { services } from '../../application'
 import { DEMO_TRIP_ID, seedDemoTrip } from '../../seed/demoSanMiguel'
+import { migrateLocalTripsToCloud } from '../../application/migrateLocalTrips'
 import { useOnline } from '../useOnline'
+import { useCloudQuery } from '../useCloudQuery'
 
 export function TripListPage() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const online = useOnline()
 
-  const trips =
-    useLiveQuery(async () => {
+  const { data: trips = [], loading, error, reload } = useCloudQuery(
+    online ? 'trips' : null,
+    async () => {
       const list = await services.trips.list()
       return list.sort((a, b) => a.startDate.localeCompare(b.startDate))
-    }) ?? []
+    },
+  )
 
   async function handleSeed() {
     setBusy(true)
     setMessage(null)
     try {
-      // Seed only — Node validators (fake-indexeddb / db.delete) must not run in the browser.
       await seedDemoTrip(services)
-      setMessage('Seed FICTICIO / DEMO cargado.')
+      reload()
+      setMessage('Seed FICTICIO / DEMO cargado en la nube.')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Error al cargar seed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleMigrate() {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await migrateLocalTripsToCloud()
+      reload()
+      if (result.count === 0) {
+        setMessage('No hay viajes locales en este dispositivo para subir.')
+      } else {
+        setMessage(
+          `Subidos ${result.count} viaje(s) de este dispositivo a la nube.`,
+        )
+      }
+    } catch (err) {
+      setMessage(
+        err instanceof Error ? err.message : 'Error al migrar viajes locales',
+      )
     } finally {
       setBusy(false)
     }
@@ -34,18 +59,30 @@ export function TripListPage() {
     <section className="page">
       <h1>Tool4Trip</h1>
       <p className="muted">
-        Organiza un viaje como fuente operativa. Los datos DEMO están marcados
-        como FICTICIOS.
+        Organiza un viaje como fuente operativa. Los datos viven en la nube
+        (misma cuenta en todos tus dispositivos).
       </p>
       {!online && (
         <p className="offline-note">
-          Sin conexión — puedes consultar viajes y documentos ya guardados.
+          Sin conexión — se requiere red para listar o editar viajes.
         </p>
       )}
+      {error && <p className="status-bad">{error.message}</p>}
 
       <div className="actions">
-        <button type="button" onClick={() => void handleSeed()} disabled={busy}>
+        <button
+          type="button"
+          onClick={() => void handleSeed()}
+          disabled={busy || !online}
+        >
           {busy ? 'Cargando…' : 'Cargar seed San Miguel (FICTICIO)'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleMigrate()}
+          disabled={busy || !online}
+        >
+          Subir viajes de este dispositivo
         </button>
         <Link to="/new" className="sum-action">
           Nuevo viaje
@@ -60,8 +97,13 @@ export function TripListPage() {
 
       {message && <p className="flash">{message}</p>}
 
-      {trips.length === 0 ? (
-        <p className="muted">No hay viajes. Usa Nuevo viaje o carga el seed demo.</p>
+      {loading ? (
+        <p className="muted">Cargando viajes…</p>
+      ) : trips.length === 0 ? (
+        <p className="muted">
+          No hay viajes en la nube. Usa Nuevo viaje, importa investigación o
+          sube viajes locales de este dispositivo.
+        </p>
       ) : (
         <ul className="trip-list">
           {trips.map((trip) => (

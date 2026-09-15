@@ -123,6 +123,146 @@ spec:
         - www.tool4trip.com
       secretName: tool4trip-tls
 ---
+# trip-api (ForwardAuth) — cloud SoT for trips / itinerary
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tool4trip-trips
+  namespace: tool4trip
+  labels:
+    app: trip-api
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: tool4trip-tool4trip-forwardauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "85"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4trip.com
+      http:
+        paths:
+          - path: /api/trips
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/bookings
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/travel-options
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/itinerary-items
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/reminders
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/checklist-items
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/notes
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/package-imports
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+    - host: www.tool4trip.com
+      http:
+        paths:
+          - path: /api/trips
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/bookings
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/travel-options
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/itinerary-items
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/reminders
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/checklist-items
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/notes
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+          - path: /api/package-imports
+            pathType: Prefix
+            backend:
+              service:
+                name: trip-api
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - tool4trip.com
+        - www.tool4trip.com
+      secretName: tool4trip-tls
+---
 # Protected PWA at /
 apiVersion: networking.k8s.io/v1
 kind: Ingress

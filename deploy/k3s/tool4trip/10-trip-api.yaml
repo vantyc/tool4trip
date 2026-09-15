@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trip-api
+  namespace: tool4trip
+  labels:
+    app: trip-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trip-api
+  template:
+    metadata:
+      labels:
+        app: trip-api
+    spec:
+      imagePullSecrets:
+        - name: ghcr-registry
+      containers:
+        - name: trip-api
+          image: ghcr.io/vantyc/trip-api:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: ":8080"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: trip-api-db
+                  key: DATABASE_URL
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 25m
+              memory: 128Mi
+            limits:
+              cpu: "500m"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trip-api
+  namespace: tool4trip
+  labels:
+    app: trip-api
+spec:
+  selector:
+    app: trip-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
