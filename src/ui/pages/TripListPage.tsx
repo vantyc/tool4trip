@@ -70,21 +70,7 @@ export function TripListPage() {
       {error && <p className="status-bad">{error.message}</p>}
 
       <div className="actions">
-        <button
-          type="button"
-          onClick={() => void handleSeed()}
-          disabled={busy || !online}
-        >
-          {busy ? 'Cargando…' : 'Cargar seed San Miguel (FICTICIO)'}
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleMigrate()}
-          disabled={busy || !online}
-        >
-          Subir viajes de este dispositivo
-        </button>
-        <Link to="/new" className="sum-action">
+        <Link to="/new" className="sum-action sum-action-primary">
           Nuevo viaje
         </Link>
         <Link to="/ask" className="sum-action">
@@ -93,6 +79,20 @@ export function TripListPage() {
         <Link to="/import" className="sum-action">
           Importar investigación
         </Link>
+        <button
+          type="button"
+          onClick={() => void handleMigrate()}
+          disabled={busy || !online}
+        >
+          Subir viajes de este dispositivo
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSeed()}
+          disabled={busy || !online}
+        >
+          {busy ? 'Cargando…' : 'Cargar seed San Miguel (FICTICIO)'}
+        </button>
       </div>
 
       {message && <p className="flash">{message}</p>}

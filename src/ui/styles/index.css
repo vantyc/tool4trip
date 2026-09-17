@@ -90,6 +90,36 @@ label textarea {
   border-top: 1px solid var(--line, #c5d2d8);
 }
 
+.new-travel-summary {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.new-travel-summary > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.new-travel-summary dt {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.75;
+}
+
+.new-travel-summary dd {
+  margin: 0;
+  font-weight: 400;
+}
+
+a.sum-action-primary {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
 .diff-table {
   width: 100%;
   border-collapse: collapse;

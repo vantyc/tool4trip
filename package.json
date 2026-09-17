@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "validate": "tsx scripts/validate-resolution.ts"
+    "validate": "tsx scripts/validate-resolution.ts",
+    "test:unit": "tsx --test src/application/*.test.ts"
   },
   "dependencies": {
     "dexie": "^4.2.1",

@@ -133,6 +133,84 @@ describe('new_travel intent + enrich', () => {
     assert.equal(arrivals.length, 2)
   })
 
+  it('hydrate new_travel keeps planned status (UI DRAFT until create)', () => {
+    const tripId = '22222222-2222-4222-8222-222222222222'
+    const req: AgentAskRequest = {
+      prompt: 'dos semanas Filipinas desde CDMX',
+      tripId,
+      mode: 'new_travel',
+      locale: 'es',
+      context: {
+        trip: {
+          id: tripId,
+          title: 'Nuevo viaje',
+          startDate: '2026-01-01',
+          endDate: '2026-01-02',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        bookings: [],
+        travelOptions: [],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+        packageImports: [],
+      },
+    }
+    const draft = {
+      narrative: 'Filipinas borrador',
+      warnings: ['Clima pendiente de verificar'],
+      diffSummary: [],
+      ops: [],
+      package: {
+        schemaVersion: 1,
+        packageId: `new-${tripId}`,
+        revision: 1,
+        trip: {
+          id: tripId,
+          title: 'Filipinas 2026',
+          destination: 'Filipinas',
+          startDate: '2026-11-10',
+          endDate: '2026-11-24',
+          timezone: 'America/Mexico_City',
+          goals: ['clima'],
+          status: 'planned',
+        },
+        travelOptions: [
+          {
+            externalId: 'flt-out',
+            type: 'flight',
+            status: 'researched',
+            title: 'MEX-MNL',
+            origin: 'MEX',
+            destination: 'MNL',
+            verificationStatus: 'estimated',
+            sourceType: 'agent',
+          },
+          {
+            externalId: 'lodge-1',
+            type: 'lodging',
+            status: 'researched',
+            title: 'Manila lodging',
+            verificationStatus: 'unverified',
+            sourceType: 'agent',
+          },
+        ],
+        itineraryItems: [],
+        checklistItems: [
+          { externalId: 'chk-1', label: 'Confirmar vuelos' },
+        ],
+        notes: [{ externalId: 'note-1', body: 'Sin reservas' }],
+      },
+    }
+    const hydrated = hydrateProposal(draft, req, [], { intent: 'new_travel' }) as {
+      package: { trip: { status: string; title: string } }
+    }
+    assert.equal(hydrated.package.trip.status, 'planned')
+    assert.equal(hydrated.package.trip.title, 'Filipinas 2026')
+  })
+
   it('enrichPackageWithAirportArrivals is idempotent', () => {
     const once = enrichPackageWithAirportArrivals({
       travelOptions: [

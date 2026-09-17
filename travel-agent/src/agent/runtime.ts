@@ -415,7 +415,9 @@ export function hydrateProposal(
         goals: normalizeGoals(
           pkgTrip.goals ?? (isNewTravel ? [] : trip.goals),
         ),
-        status: str(pkgTrip.status, str(trip.status, 'planned')),
+        status: isNewTravel
+          ? 'planned'
+          : str(pkgTrip.status, str(trip.status, 'planned')),
         // Explicit null/empty from a context-only draft must not re-echo Dexie notes
         // into the proposal package (those are INPUT CONTEXT, not agent output).
         notes:
