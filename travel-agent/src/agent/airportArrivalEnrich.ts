@@ -2,6 +2,7 @@ import {
   buildAirportArrivalItinerary,
   type FlightLike,
 } from '../../shared/airportArrivalPolicy.ts'
+import { stripLlmAirportArrivalItems } from './newTravelCoherence.ts'
 
 type Rec = Record<string, unknown>
 
@@ -16,9 +17,10 @@ function str(v: unknown): string {
 /**
  * Merge airport-arrival itinerary items into a TripPackage draft (idempotent by externalId).
  * Does not invent flights — only enriches existing flight options that already have startAt.
+ * Strips LLM duplicate airport rows first; emits one arrival per flight.
  */
 export function enrichPackageWithAirportArrivals(pkgIn: unknown): Rec {
-  const pkg = { ...asRec(pkgIn) }
+  const pkg = stripLlmAirportArrivalItems(pkgIn)
   const options = Array.isArray(pkg.travelOptions) ? [...pkg.travelOptions] : []
   const flights: FlightLike[] = []
   for (const o of options) {
@@ -35,10 +37,14 @@ export function enrichPackageWithAirportArrivals(pkgIn: unknown): Rec {
     })
   }
 
-  const arrivals = buildAirportArrivalItinerary(flights)
+  // Drop stale online twin reminders from older server versions.
   const existing = Array.isArray(pkg.itineraryItems)
-    ? [...pkg.itineraryItems]
+    ? pkg.itineraryItems.filter((raw) => {
+        const id = str(asRec(raw).externalId)
+        return !id.startsWith('airport-arrival-online-')
+      })
     : []
+  const arrivals = buildAirportArrivalItinerary(flights)
   const byId = new Map<string, Rec>()
   for (const item of existing) {
     const r = asRec(item)

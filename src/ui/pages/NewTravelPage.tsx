@@ -175,7 +175,7 @@ export function NewTravelPage() {
               <dd>
                 {summary.startDate} → {summary.endDate} (
                 {summary.durationDays > 0
-                  ? `${summary.durationDays} día(s)`
+                  ? `${summary.durationDays} día(s) · ${summary.nights} noche(s)`
                   : UNKNOWN}
                 )
               </dd>

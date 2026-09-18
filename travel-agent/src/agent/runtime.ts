@@ -33,6 +33,10 @@ import {
   tryContextAnswer,
 } from './intent.ts'
 import { enrichPackageWithAirportArrivals } from './airportArrivalEnrich.ts'
+import {
+  collectNewTravelServerWarnings,
+  ensureNewTravelSkeleton,
+} from './newTravelCoherence.ts'
 import { agentProposalStructuredResponseFormat } from './proposalSchema.ts'
 
 export type AgentRunMeta = {
@@ -376,8 +380,13 @@ export function hydrateProposal(
     : Math.max(1, priorRevision + 1)
 
   let pkg = asRecord(withoutClaims.package)
+  const coherenceWarnings: string[] = []
   if (isNewTravel) {
+    pkg = ensureNewTravelSkeleton(pkg, req.prompt)
     pkg = enrichPackageWithAirportArrivals(pkg)
+    coherenceWarnings.push(
+      ...collectNewTravelServerWarnings(pkg, req.prompt, toolTrace),
+    )
   }
   const collections = sanitizePackageCollections(pkg)
   const pkgTrip = asRecord(pkg.trip)
@@ -385,7 +394,11 @@ export function hydrateProposal(
   const modelWarnings = Array.isArray(withoutClaims.warnings)
     ? withoutClaims.warnings.filter((w): w is string => typeof w === 'string')
     : []
-  const warnings = [...modelWarnings, ...(opts?.serverWarnings ?? [])]
+  const warnings = [
+    ...modelWarnings,
+    ...(opts?.serverWarnings ?? []),
+    ...coherenceWarnings,
+  ]
 
   return {
     ...withoutClaims,

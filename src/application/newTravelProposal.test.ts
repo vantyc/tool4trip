@@ -82,6 +82,7 @@ describe('newTravelProposal', () => {
     assert.equal(summary.draftLabel, 'DRAFT')
     assert.equal(summary.domainStatus, 'planned')
     assert.equal(summary.durationDays, 15)
+    assert.equal(summary.nights, 14)
     assert.equal(summary.origin, 'MEX — CDMX')
     assert.ok(summary.destinations.includes('Filipinas'))
     assert.equal(summary.transport.length, 1)

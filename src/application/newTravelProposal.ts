@@ -14,7 +14,10 @@ export type NewTravelSummary = {
   domainStatus: 'planned'
   startDate: string
   endDate: string
+  /** Inclusive calendar days (19→22 = 4). */
   durationDays: number
+  /** Lodging nights = end − start (19→22 = 3). */
+  nights: number
   origin: string
   destinations: string[]
   transport: Array<{
@@ -40,6 +43,13 @@ function inclusiveDurationDays(startDate: string, endDate: string): number {
   const b = Date.parse(`${endDate}T12:00:00Z`)
   if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0
   return Math.floor((b - a) / 86_400_000) + 1
+}
+
+function lodgingNights(startDate: string, endDate: string): number {
+  const a = Date.parse(`${startDate}T12:00:00Z`)
+  const b = Date.parse(`${endDate}T12:00:00Z`)
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0
+  return Math.floor((b - a) / 86_400_000)
 }
 
 function collectOrigins(pkg: SharedTripPackageV1): string {
@@ -109,6 +119,7 @@ export function summarizeNewTravelProposal(
     startDate: pkg.trip.startDate || UNKNOWN,
     endDate: pkg.trip.endDate || UNKNOWN,
     durationDays: inclusiveDurationDays(pkg.trip.startDate, pkg.trip.endDate),
+    nights: lodgingNights(pkg.trip.startDate, pkg.trip.endDate),
     origin: collectOrigins(pkg),
     destinations: collectDestinations(pkg),
     transport,

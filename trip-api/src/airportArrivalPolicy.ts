@@ -150,7 +150,9 @@ export type AirportArrivalItineraryDraft = {
 
 /**
  * Build airport-arrival itinerary drafts from flight options with startAt.
- * Idempotent externalIds: airport-arrival-desk-{flightExtId}, airport-arrival-online-{flightExtId}
+ * One reminder per flight (desk / bag-drop). Online timing is documented in notes
+ * to avoid duplicate generic airport activities in the itinerary.
+ * Idempotent externalId: airport-arrival-desk-{flightExtId}
  */
 export function buildAirportArrivalItinerary(
   flights: FlightLike[],
@@ -174,7 +176,7 @@ export function buildAirportArrivalItinerary(
 
     out.push({
       externalId: `airport-arrival-desk-${safeId}`,
-      title: `Arribo al aeropuerto ${airport} (documentar)`,
+      title: `Arribo al aeropuerto ${airport}`,
       startAt: deskAt,
       place: airport,
       importance: 'crucial',
@@ -182,23 +184,10 @@ export function buildAirportArrivalItinerary(
         `Vuelo: ${f.title}`,
         `Alcance: ${scopeLabel}`,
         `Salida: ${f.startAt}`,
-        `Estar a más tardar a las ${formatClockEs(deskAt)} si documentas en mostrador (+${deskMinutes} min antes).`,
-        `Si solo documentas en línea: ${formatClockEs(onlineAt)} (+${onlineMinutes} min antes).`,
+        `Mostrador/documentar: estar a más tardar a las ${formatClockEs(deskAt)} (+${deskMinutes} min antes).`,
+        `Si ya documentaste en línea: ${formatClockEs(onlineAt)} (+${onlineMinutes} min antes) — no es un segundo evento del itinerario.`,
       ].join('\n'),
-      reminderLabel: `Estar en ${airport} para documentar (vuelo ${f.title})`,
-    })
-    out.push({
-      externalId: `airport-arrival-online-${safeId}`,
-      title: `Arribo al aeropuerto ${airport} (solo online)`,
-      startAt: onlineAt,
-      place: airport,
-      importance: 'crucial',
-      notes: [
-        `Vuelo: ${f.title}`,
-        `Alcance: ${scopeLabel}`,
-        `Límite si ya documentaste en línea: ${formatClockEs(onlineAt)}.`,
-      ].join('\n'),
-      reminderLabel: `Estar en ${airport} (check-in online) — ${f.title}`,
+      reminderLabel: `Estar en ${airport} para el vuelo ${f.title}`,
     })
   }
   return out
