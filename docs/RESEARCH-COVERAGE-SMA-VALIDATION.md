@@ -90,4 +90,15 @@ Discard any aborted enqueue/poll runs (e.g. `kubectl cp` targeting `deploy/` ins
 - `travel-agent/src/agent/claims.test.ts` — skeleton drops invalid `evidenceIndex` claims instead of failing closed; existing scrub / aggregate-flight cases  
 - `src/application/tripPanel/buildTripPanel.test.ts` — consulted vs anchored diagnostics distinction (case 14)  
 
-Implementation: `travel-agent/src/agent/researchCoverage.ts` (wired from `runtime.ts`, `prompts.ts`, `claims.ts`; optional `researchDiagnostics` on proposal contract).
+## Flight-critical priority (follow-up)
+
+Closed separately from the initial coverage ship. Canonical regression job:
+
+| | Job ID |
+|--|--------|
+| **Before** | `24bf6051-bfee-4046-ab16-83ee7fc1d0c0` |
+| **After** | `898b7032-0e89-40d2-80bd-b930f4b61b62` |
+
+Changes: critical `flight_day_specific` tier, directed carrier retry before lodging/events, `fetch_blocked_js` / day-specific criteria, no false RESOLVED for `airport_terminal` / `connection_feasibility` from bus terminal URLs.
+
+After validation outcome: flight remained UNRESOLVED without inventing schedule; tool budget spent on flight searches + airline fetches (no lodging/event calls); connection correctly UNRESOLVED (flight arrival unknown). webSearch+fetchUrl still insufficient for day-specific MX domestic inventory — next phase (not implemented): Amadeus/Duffel/etc.
