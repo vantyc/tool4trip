@@ -4,6 +4,7 @@ import type {
   AgentJobStatus,
   AgentJobStatusResponse,
   AgentProposal,
+  ComponentActionResult,
   ToolTraceEntry,
 } from '../../shared/agentContracts.ts'
 
@@ -27,6 +28,7 @@ export type JobRecord = {
   /** Cleared when job reaches a terminal state. */
   request?: AgentAskRequest
   proposal?: AgentProposal
+  componentActionResult?: ComponentActionResult
   error?: JobError
   toolTrace?: ToolTraceEntry[]
   steps?: number
@@ -122,6 +124,9 @@ export class InMemoryJobStore {
     if (job.status === 'succeeded' && job.proposal) {
       out.proposal = job.proposal
     }
+    if (job.status === 'succeeded' && job.componentActionResult) {
+      out.componentActionResult = job.componentActionResult
+    }
     if (job.status === 'failed' && job.error) {
       out.error = job.error
     }
@@ -146,17 +151,30 @@ export class InMemoryJobStore {
     return undefined
   }
 
-  markSucceeded(jobId: string, proposal: AgentProposal, meta?: {
-    steps?: number
-    lastFinishReason?: string | null
-    usage?: JobUsageTotals
-  }): void {
+  markSucceeded(
+    jobId: string,
+    payload: {
+      proposal?: AgentProposal
+      componentActionResult?: ComponentActionResult
+    },
+    meta?: {
+      steps?: number
+      lastFinishReason?: string | null
+      usage?: JobUsageTotals
+    },
+  ): void {
     const job = this.jobs.get(jobId)
     if (!job || TERMINAL.has(job.status)) return
     if (job.status === 'running') this.runningCount = Math.max(0, this.runningCount - 1)
     job.status = 'succeeded'
-    job.proposal = proposal
-    job.toolTrace = proposal.toolTrace
+    if (payload.proposal) {
+      job.proposal = payload.proposal
+      job.toolTrace = payload.proposal.toolTrace
+    }
+    if (payload.componentActionResult) {
+      job.componentActionResult = payload.componentActionResult
+      job.toolTrace = payload.componentActionResult.toolTrace
+    }
     if (meta?.steps !== undefined) job.steps = meta.steps
     if (meta?.lastFinishReason !== undefined) {
       job.lastFinishReason = meta.lastFinishReason

@@ -321,4 +321,23 @@ describe('tripPanel model', () => {
       !model.activities.some((a) => a.id.startsWith('airport-arrival-')),
     )
   })
+
+  it('13: user_supplied distinct from estimated/unknown', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    const flt = pkg.travelOptions.find((o) => o.type === 'flight')
+    assert.ok(flt)
+    flt!.sourceType = 'manual'
+    flt!.verificationStatus = 'unverified'
+    flt!.startAt = '2026-09-19T19:40:00-06:00'
+    flt!.notes = 'Dato del viajero: sale a las 19:40'
+    const model = buildTripPanelFromPackage(pkg)
+    const card = [...model.flightsOut, ...model.flightsReturn].find(
+      (c) => c.externalId === flt!.externalId,
+    )
+    assert.ok(card)
+    assert.equal(card!.status, 'user_supplied')
+    assert.equal(card!.startAt, '2026-09-19T19:40:00-06:00')
+    assert.notEqual(card!.status, 'estimated')
+    assert.notEqual(card!.status, 'pending')
+  })
 })

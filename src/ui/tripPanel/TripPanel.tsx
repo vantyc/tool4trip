@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import type { TripPanelModel } from '../../application/tripPanel'
+import type { TripPanelCard, TripPanelModel } from '../../application/tripPanel'
+import type { ComponentActionControlsProps } from './ComponentActionControls'
 import { CardSection } from './OptionCard'
 import { IntegritySummary, TripHeader } from './TripHeader'
 
@@ -14,6 +15,10 @@ export type TripPanelProps = {
    * and tighten vertical rhythm.
    */
   embedded?: boolean
+  /** Interactive TripPanel — per-card action props. */
+  getActionProps?: (
+    card: TripPanelCard,
+  ) => Omit<ComponentActionControlsProps, 'card'> | undefined
 }
 
 export function TripPanel({
@@ -21,6 +26,7 @@ export function TripPanel({
   actions,
   showEmptySections = true,
   embedded = false,
+  getActionProps,
 }: TripPanelProps) {
   const empty = showEmptySections ? 'Sin datos en la propuesta.' : undefined
   const techWarnings = model.technical?.warnings.filter((w) => w.trim()) ?? []
@@ -39,26 +45,31 @@ export function TripPanel({
           title="Vuelos de ida"
           cards={model.flightsOut}
           emptyLabel={empty}
+          getActionProps={getActionProps}
         />
         <CardSection
           title="Vuelos de regreso"
           cards={model.flightsReturn}
           emptyLabel={empty}
+          getActionProps={getActionProps}
         />
         <CardSection
           title="Traslados terrestres"
           cards={model.ground}
           emptyLabel={empty}
+          getActionProps={getActionProps}
         />
         <CardSection
           title="Hospedaje"
           cards={model.lodging}
           emptyLabel={empty}
+          getActionProps={getActionProps}
         />
         <CardSection
           title="Actividades e itinerario"
           cards={model.activities}
           emptyLabel={empty}
+          getActionProps={getActionProps}
         />
         <CardSection
           title="Pendientes"

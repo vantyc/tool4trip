@@ -24,9 +24,10 @@ function norm(s: string): string {
  */
 export function classifyAskIntent(
   prompt: string,
-  mode?: 'ask' | 'new_travel',
+  mode?: 'ask' | 'new_travel' | 'component_action',
 ): AskIntent {
   if (mode === 'new_travel') return 'new_travel'
+  if (mode === 'component_action') return 'mutation'
 
   const p = norm(prompt)
 

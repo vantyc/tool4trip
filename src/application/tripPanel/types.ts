@@ -7,6 +7,7 @@ export type VisualStatus =
   | 'confirmed'
   | 'verified'
   | 'estimated'
+  | 'user_supplied'
   | 'pending'
   | 'alternative'
   | 'missing'
@@ -51,6 +52,13 @@ export type TripPanelCard = {
   body?: string
   /** FlightCard only — derived from startAt via airportArrivalPolicy. */
   airportArrival?: AirportArrivalInfo
+  /** Package externalId (stable componentId). */
+  externalId?: string
+  sourceType?: string
+  verificationStatus?: string
+  /** Raw option type for component actions. */
+  optionType?: string
+  entityKind?: 'travelOption' | 'itineraryItem' | 'checklistItem' | 'note'
 }
 
 export type IntegrityLight = 'green' | 'amber' | 'red'
@@ -107,6 +115,7 @@ export const VISUAL_STATUS_LABEL: Record<VisualStatus, string> = {
   confirmed: 'Confirmado',
   verified: 'Verificado',
   estimated: 'Estimado',
+  user_supplied: 'Dato del viajero',
   pending: 'Pendiente',
   alternative: 'Alternativa',
   missing: 'Faltante',

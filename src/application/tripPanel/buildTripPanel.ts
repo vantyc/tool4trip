@@ -131,6 +131,7 @@ function visualFromOption(o: {
   status?: string
   verificationStatus?: string
   sourceUrl?: string
+  sourceType?: string
   notes?: string
   bookingId?: string
 }): VisualStatus {
@@ -138,6 +139,14 @@ function visualFromOption(o: {
     return 'confirmed'
   }
   if (isAlternative(o)) return 'alternative'
+  // User-supplied EDIT: visible and distinct from estimated/unknown
+  if (
+    o.sourceType === 'manual' ||
+    (o.verificationStatus === 'unverified' &&
+      /Dato del viajero/i.test(o.notes ?? ''))
+  ) {
+    return 'user_supplied'
+  }
   if (o.verificationStatus === 'verified' && o.sourceUrl) return 'verified'
   if (o.verificationStatus === 'verified') return 'verified'
   if (o.verificationStatus === 'estimated') return 'estimated'
@@ -149,7 +158,11 @@ function visualFromOption(o: {
 
 /** Soft statuses must not surface inventable concrete price/clock in the UI. */
 function allowsConcreteDisplay(status: VisualStatus): boolean {
-  return status === 'verified' || status === 'confirmed'
+  return (
+    status === 'verified' ||
+    status === 'confirmed' ||
+    status === 'user_supplied'
+  )
 }
 
 function truncate(s: string, n: number): string {
@@ -191,6 +204,7 @@ function optionToCard(
     title: string
     status?: string
     verificationStatus?: string
+    sourceType?: string
     sourceUrl?: string
     notes?: string
     startAt?: string
@@ -213,6 +227,12 @@ function optionToCard(
     title: o.title,
     status,
   }
+  if (o.externalId) card.externalId = o.externalId
+  else if (o.id) card.externalId = o.id
+  if (o.sourceType) card.sourceType = o.sourceType
+  if (o.verificationStatus) card.verificationStatus = o.verificationStatus
+  if (o.type) card.optionType = o.type
+  card.entityKind = 'travelOption'
   const concrete = allowsConcreteDisplay(status)
   const scheduleOk = concrete || Boolean(opts?.retainSchedule)
   if (scheduleOk && o.startAt) card.startAt = o.startAt

@@ -8,6 +8,13 @@ export {
   isAirportArrivalActivity,
   normPlace,
 } from './buildTripPanel'
+export {
+  mergeComponentActionIntoPackage,
+  buildPromotePreview,
+  StaleRevisionError,
+} from './mergeComponentAction'
+export { actionsForCardKind, ACTION_LABEL } from './componentActions'
+export type { CardActionIntent } from './componentActions'
 export type {
   TripPanelModel,
   TripPanelCard,

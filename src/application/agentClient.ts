@@ -3,8 +3,11 @@ import {
   agentJobCreateResponseSchema,
   agentJobStatusResponseSchema,
   agentProposalSchema,
+  componentActionResultSchema,
   type AgentAskRequest,
   type AgentProposal,
+  type ComponentActionPayload,
+  type ComponentActionResult,
 } from '../../shared/agentContracts'
 import type { Services } from './services'
 import type { ImportUpdatePlan } from './packageImport'
@@ -222,4 +225,99 @@ export async function applyAgentProposal(
   }
   const result = await services.packages.importPackage(validated.package)
   return { tripId: result.tripId }
+}
+
+/**
+ * Interactive TripPanel: scoped component action (EDIT / RESEARCH / VERIFY).
+ * Reuses the same async job queue as Ask Travel.
+ */
+export async function componentActionAgent(
+  _services: Services,
+  input: {
+    tripId: string
+    prompt: string
+    componentAction: ComponentActionPayload
+    context?: AgentAskRequest['context']
+  },
+  opts?: {
+    onProgress?: (p: AskTravelProgress) => void
+    signal?: AbortSignal
+  },
+): Promise<ComponentActionResult> {
+  const context =
+    input.context ??
+    (await buildTripContextSnapshot(httpRepositories, input.tripId))
+  const body: AgentAskRequest = agentAskRequestSchema.parse({
+    prompt: input.prompt,
+    tripId: input.tripId,
+    context,
+    locale: 'es',
+    mode: 'component_action',
+    componentAction: input.componentAction,
+  })
+
+  const res = await fetch('/api/agent/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(body),
+    signal: opts?.signal,
+  })
+  if (res.status === 401) {
+    throw new Error('Sesión requerida — vuelve a iniciar sesión.')
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `Error del agente (${res.status})`)
+  }
+
+  if (res.status === 200) {
+    const json = await res.json()
+    if (json.componentActionResult) {
+      return componentActionResultSchema.parse(json.componentActionResult)
+    }
+    throw new Error('Respuesta sync sin componentActionResult')
+  }
+
+  const created = agentJobCreateResponseSchema.parse(await res.json())
+  opts?.onProgress?.({ jobId: created.jobId, status: 'queued' })
+
+  const t0 = Date.now()
+  let waited = false
+  while (Date.now() - t0 < POLL_MAX_MS) {
+    if (opts?.signal?.aborted) throw new Error('Consulta cancelada')
+    if (waited) await sleep(POLL_MS)
+    waited = true
+    const stRes = await fetch(
+      `/api/agent/jobs/${encodeURIComponent(created.jobId)}`,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        signal: opts?.signal,
+      },
+    )
+    if (stRes.status === 401) {
+      throw new Error('Sesión requerida — vuelve a iniciar sesión.')
+    }
+    if (stRes.status === 404) {
+      throw new Error('Trabajo del agente no encontrado (¿expiró?)')
+    }
+    if (!stRes.ok) {
+      const text = await stRes.text().catch(() => '')
+      throw new Error(text || `Error consultando job (${stRes.status})`)
+    }
+    const status = agentJobStatusResponseSchema.parse(await stRes.json())
+    opts?.onProgress?.({ jobId: status.jobId, status: status.status })
+    if (status.status === 'succeeded') {
+      if (!status.componentActionResult) {
+        throw new Error('Job succeeded sin componentActionResult')
+      }
+      return componentActionResultSchema.parse(status.componentActionResult)
+    }
+    if (status.status === 'failed') {
+      throw new Error(status.error?.message || 'El agente falló sin detalle')
+    }
+  }
+  throw new Error('Tiempo de espera agotado mientras investigaba el componente')
 }

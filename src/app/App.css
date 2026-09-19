@@ -939,6 +939,122 @@ button:disabled {
   padding-bottom: 0.5rem;
 }
 
+.tp-card-head-right {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.tp-card-actions {
+  position: relative;
+}
+
+.tp-card-menu-btn {
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.tp-card-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+  margin: 0.15rem 0 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  min-width: 10rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.tp-card-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.tp-adjust-box,
+.tp-action-sheet {
+  margin-top: 0.55rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--line);
+  background: var(--bg-accent);
+  grid-column: 1 / -1;
+}
+
+.tp-adjust-box textarea {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.tp-adjust-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.tp-card-busy {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+.tp-action-op {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+}
+
+.tp-action-narrative {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.tp-action-diff {
+  font-size: 0.8rem;
+}
+
+.tp-action-alts h5,
+.tp-action-impacts h5 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-muted);
+}
+
+.tp-action-alts ul,
+.tp-action-impacts ul {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.tp-action-alts li,
+.tp-action-impacts li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.25rem 0;
+  font-size: 0.88rem;
+}
+
+.tp-promote-btn {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.4rem;
+}
+
 .tp-card-missing {
   border-style: dashed;
   opacity: 0.9;
@@ -977,6 +1093,12 @@ button:disabled {
 
 .tp-badge-estimated {
   color: #6b5b2e;
+}
+
+.tp-badge-user_supplied {
+  color: #1a4a6a;
+  border-color: color-mix(in srgb, #1a4a6a 45%, var(--line));
+  background: color-mix(in srgb, #1a4a6a 8%, var(--bg));
 }
 
 .tp-badge-pending,

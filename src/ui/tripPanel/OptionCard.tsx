@@ -2,6 +2,10 @@ import type { ReactNode } from 'react'
 import type { TripPanelCard, VisualStatus } from '../../application/tripPanel'
 import { VISUAL_STATUS_LABEL } from '../../application/tripPanel'
 import { formatClockEs } from '../../../shared/airportArrivalPolicy'
+import {
+  ComponentActionControls,
+  type ComponentActionControlsProps,
+} from './ComponentActionControls'
 
 function formatWhen(iso?: string): string | undefined {
   if (!iso) return undefined
@@ -28,15 +32,20 @@ export function StatusBadge({ status }: { status: VisualStatus }) {
 function CardShell({
   card,
   children,
+  actionSlot,
 }: {
   card: TripPanelCard
   children?: ReactNode
+  actionSlot?: ReactNode
 }) {
   return (
     <article className={`tp-card tp-card-${card.kind} tp-card-${card.status}`}>
       <header className="tp-card-head">
         <h4 className="tp-card-title">{card.title}</h4>
-        <StatusBadge status={card.status} />
+        <div className="tp-card-head-right">
+          <StatusBadge status={card.status} />
+          {actionSlot}
+        </div>
       </header>
       {children}
     </article>
@@ -69,7 +78,13 @@ function FieldList({
   )
 }
 
-export function FlightCard({ card }: { card: TripPanelCard }) {
+export function FlightCard({
+  card,
+  actionProps,
+}: {
+  card: TripPanelCard
+  actionProps?: Omit<ComponentActionControlsProps, 'card'>
+}) {
   const when = formatWhen(card.startAt)
   const until = formatWhen(card.endAt)
   const price = formatPrice(card.price, card.currency)
@@ -82,9 +97,12 @@ export function FlightCard({ card }: { card: TripPanelCard }) {
   } else if (
     card.status === 'estimated' ||
     card.status === 'pending' ||
-    card.status === 'alternative'
+    card.status === 'alternative' ||
+    card.status === 'user_supplied'
   ) {
-    rows.push({ label: 'Horario', value: 'Pendiente de verificar' })
+    if (card.status !== 'user_supplied') {
+      rows.push({ label: 'Horario', value: 'Pendiente de verificar' })
+    }
   }
   if (card.origin) rows.push({ label: 'Origen', value: card.origin })
   if (card.destination) rows.push({ label: 'Destino', value: card.destination })
@@ -96,9 +114,12 @@ export function FlightCard({ card }: { card: TripPanelCard }) {
   if (card.notes) rows.push({ label: 'Notas', value: card.notes })
 
   const arrival = card.airportArrival
+  const actionSlot = actionProps ? (
+    <ComponentActionControls card={card} {...actionProps} />
+  ) : undefined
 
   return (
-    <CardShell card={card}>
+    <CardShell card={card} actionSlot={actionSlot}>
       <FieldList rows={rows} />
       {arrival && (
         <div className="tp-flight-arrival">
@@ -119,7 +140,13 @@ export function FlightCard({ card }: { card: TripPanelCard }) {
   )
 }
 
-export function LodgingCard({ card }: { card: TripPanelCard }) {
+export function LodgingCard({
+  card,
+  actionProps,
+}: {
+  card: TripPanelCard
+  actionProps?: Omit<ComponentActionControlsProps, 'card'>
+}) {
   const checkIn = formatWhen(card.startAt)
   const checkOut = formatWhen(card.endAt)
   const price = formatPrice(card.price, card.currency)
@@ -145,13 +172,26 @@ export function LodgingCard({ card }: { card: TripPanelCard }) {
   }
   if (card.notes) rows.push({ label: 'Notas', value: card.notes })
   return (
-    <CardShell card={card}>
+    <CardShell
+      card={card}
+      actionSlot={
+        actionProps ? (
+          <ComponentActionControls card={card} {...actionProps} />
+        ) : undefined
+      }
+    >
       <FieldList rows={rows} />
     </CardShell>
   )
 }
 
-export function GroundCard({ card }: { card: TripPanelCard }) {
+export function GroundCard({
+  card,
+  actionProps,
+}: {
+  card: TripPanelCard
+  actionProps?: Omit<ComponentActionControlsProps, 'card'>
+}) {
   const when = formatWhen(card.startAt)
   const price = formatPrice(card.price, card.currency)
   const rows: Array<{ label: string; value: string; href?: string }> = []
@@ -165,13 +205,26 @@ export function GroundCard({ card }: { card: TripPanelCard }) {
   }
   if (card.notes) rows.push({ label: 'Notas', value: card.notes })
   return (
-    <CardShell card={card}>
+    <CardShell
+      card={card}
+      actionSlot={
+        actionProps ? (
+          <ComponentActionControls card={card} {...actionProps} />
+        ) : undefined
+      }
+    >
       <FieldList rows={rows} />
     </CardShell>
   )
 }
 
-export function ActivityCard({ card }: { card: TripPanelCard }) {
+export function ActivityCard({
+  card,
+  actionProps,
+}: {
+  card: TripPanelCard
+  actionProps?: Omit<ComponentActionControlsProps, 'card'>
+}) {
   const when = formatWhen(card.startAt)
   const until = formatWhen(card.endAt)
   const rows: Array<{ label: string; value: string; href?: string }> = []
@@ -192,7 +245,14 @@ export function ActivityCard({ card }: { card: TripPanelCard }) {
   }
   if (card.notes) rows.push({ label: 'Notas', value: card.notes })
   return (
-    <CardShell card={card}>
+    <CardShell
+      card={card}
+      actionSlot={
+        actionProps ? (
+          <ComponentActionControls card={card} {...actionProps} />
+        ) : undefined
+      }
+    >
       <FieldList rows={rows} />
     </CardShell>
   )
@@ -233,22 +293,25 @@ export function SourceCard({ card }: { card: TripPanelCard }) {
   )
 }
 
-export function OptionCard({ card }: { card: TripPanelCard }) {
+export function OptionCard({
+  card,
+  actionProps,
+}: {
+  card: TripPanelCard
+  actionProps?: Omit<ComponentActionControlsProps, 'card'>
+}) {
   switch (card.kind) {
     case 'flight_out':
     case 'flight_return':
-      return <FlightCard card={card} />
+      return <FlightCard card={card} actionProps={actionProps} />
     case 'lodging':
+      return <LodgingCard card={card} actionProps={actionProps} />
     case 'missing_slot':
-      return card.kind === 'lodging' ? (
-        <LodgingCard card={card} />
-      ) : (
-        <CardShell card={card} />
-      )
+      return <CardShell card={card} />
     case 'ground':
-      return <GroundCard card={card} />
+      return <GroundCard card={card} actionProps={actionProps} />
     case 'activity':
-      return <ActivityCard card={card} />
+      return <ActivityCard card={card} actionProps={actionProps} />
     case 'checklist':
       return <ChecklistCard card={card} />
     case 'note':
@@ -264,10 +327,14 @@ export function CardSection({
   title,
   cards,
   emptyLabel,
+  getActionProps,
 }: {
   title: string
   cards: TripPanelCard[]
   emptyLabel?: string
+  getActionProps?: (
+    card: TripPanelCard,
+  ) => Omit<ComponentActionControlsProps, 'card'> | undefined
 }) {
   if (cards.length === 0) {
     if (!emptyLabel) return null
@@ -283,7 +350,11 @@ export function CardSection({
       <h3 className="tp-section-title">{title}</h3>
       <div className="tp-card-grid">
         {cards.map((c) => (
-          <OptionCard key={c.id} card={c} />
+          <OptionCard
+            key={c.id}
+            card={c}
+            actionProps={getActionProps?.(c)}
+          />
         ))}
       </div>
     </section>

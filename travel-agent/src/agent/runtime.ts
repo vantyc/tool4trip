@@ -60,7 +60,8 @@ export type AgentRunMeta = {
 }
 
 export type AgentRunResult = {
-  proposal: AgentProposal
+  proposal?: AgentProposal
+  componentActionResult?: import('../../shared/agentContracts.ts').ComponentActionResult
   meta: AgentRunMeta
 }
 
@@ -650,6 +651,18 @@ export async function runAgentAsk(
   }
 
   try {
+    if (req.mode === 'component_action') {
+      const { runComponentAction } = await import('./componentAction.ts')
+      const ca = await runComponentAction(req, deps)
+      return {
+        componentActionResult: ca.componentActionResult,
+        meta: {
+          ...ca.meta,
+          toolTrace: ca.componentActionResult.toolTrace,
+        },
+      }
+    }
+
     const intent = classifyAskIntent(req.prompt, req.mode)
     logJobEvent('ask_intent', {
       jobId: deps.jobId ?? null,
