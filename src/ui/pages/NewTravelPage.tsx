@@ -7,6 +7,7 @@ import {
   previewAgentProposal,
   type AgentProposal,
 } from '../../application/agentClient'
+import { formatAgentCaughtError } from '../../application/agentErrors'
 import type { ImportUpdatePlan } from '../../application/packageImport'
 import {
   discardNewTravelProposal,
@@ -56,7 +57,7 @@ export function NewTravelPage() {
       setPlan(preview.plan)
       setJobStatus(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al planear')
+      setError(formatAgentCaughtError(err))
       setJobStatus(null)
     } finally {
       setBusy(false)
@@ -78,7 +79,7 @@ export function NewTravelPage() {
       )
       navigate(`/trips/${tid}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al crear viaje')
+      setError(formatAgentCaughtError(err))
     } finally {
       setBusy(false)
     }
@@ -130,7 +131,11 @@ export function NewTravelPage() {
           onClick={() => void handlePlan()}
           disabled={busy || !online || !prompt.trim()}
         >
-          {busy && !proposal ? 'Investigando…' : 'Generar propuesta'}
+          {busy && !proposal
+            ? 'Investigando…'
+            : error
+              ? 'Reintentar'
+              : 'Generar propuesta'}
         </button>
       </div>
 
@@ -144,7 +149,11 @@ export function NewTravelPage() {
         </p>
       )}
 
-      {error && <p className="status-bad">{error}</p>}
+      {error && (
+        <p className="status-bad" role="alert">
+          {error}
+        </p>
+      )}
 
       {proposal && summary && (
         <div className="agent-proposal">

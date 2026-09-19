@@ -34,6 +34,11 @@ import {
 } from './intent.ts'
 import { enrichPackageWithAirportArrivals } from './airportArrivalEnrich.ts'
 import {
+  formatProposalValidationUserError,
+  normalizeProposalDatetimes,
+  softDropInvalidDatetimePaths,
+} from './datetimeNormalize.ts'
+import {
   collectNewTravelServerWarnings,
   ensureNewTravelSkeleton,
 } from './newTravelCoherence.ts'
@@ -156,7 +161,16 @@ function ensureExternalId(
 
 function optionalIso(v: unknown): string | undefined {
   const s = nonEmptyStr(v)
-  return s || undefined
+  if (!s) return undefined
+  // Keep only already-valid ISO-with-offset here; normalizeProposalDatetimes
+  // runs earlier and either fixes or drops bare datetimes.
+  if (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) &&
+    (/[+-]\d{2}:\d{2}$/.test(s) || /Z$/i.test(s))
+  ) {
+    return s
+  }
+  return undefined
 }
 
 /** Drop/fill incomplete package entities so Zod proposal schema always passes. */
@@ -460,7 +474,17 @@ function tryParseProposal(
 ): ParseProposalResult {
   try {
     const raw = extractJsonObject(text)
-    const draft = asRecord(stripNulls(raw))
+    let draft = asRecord(stripNulls(raw))
+    const tripTz = str(
+      asRecord(asRecord(draft.package).trip).timezone,
+      str(asRecord(req.context.trip).timezone, 'America/Mexico_City'),
+    )
+    const normalized = normalizeProposalDatetimes(draft, {
+      tripTimezoneFallback: tripTz,
+    })
+    draft = asRecord(normalized.value)
+    const dtWarnings = [...normalized.warnings]
+
     const grounding = assertDraftGrounded(draft, toolTrace, req.context, {
       allowSkeletonPackage: intent === 'new_travel' || req.mode === 'new_travel',
       userPrompt: req.prompt,
@@ -474,11 +498,34 @@ function tryParseProposal(
         warnings: grounding.warnings,
       }
     }
-    const hydrated = hydrateProposal(grounding.draft, req, toolTrace, {
-      serverWarnings: [],
+
+    let hydrated: unknown = hydrateProposal(grounding.draft, req, toolTrace, {
+      serverWarnings: dtWarnings,
       intent,
     })
-    const parsed = agentProposalSchema.safeParse(hydrated)
+    let parsed = agentProposalSchema.safeParse(hydrated)
+
+    if (!parsed.success) {
+      const soft = softDropInvalidDatetimePaths(
+        hydrated,
+        parsed.error.issues.map((i) => ({
+          path: [...i.path] as PropertyKey[],
+          message: i.message,
+        })),
+      )
+      const renorm = normalizeProposalDatetimes(soft.value, {
+        tripTimezoneFallback: tripTz,
+      })
+      const merged = asRecord(renorm.value)
+      const extra = [...dtWarnings, ...soft.warnings, ...renorm.warnings]
+      const prevWarn = Array.isArray(merged.warnings)
+        ? merged.warnings.filter((w): w is string => typeof w === 'string')
+        : []
+      merged.warnings = [...prevWarn, ...extra]
+      hydrated = merged
+      parsed = agentProposalSchema.safeParse(hydrated)
+    }
+
     if (!parsed.success) {
       return { ok: false, error: parsed.error.message }
     }
@@ -822,7 +869,9 @@ export async function runAgentAsk(
     throw new AgentRuntimeError(
       failCode === 'ungrounded_claims'
         ? second.error
-        : `AgentProposal JSON inválido tras repair: ${second.error}`,
+        : formatProposalValidationUserError(
+            `AgentProposal JSON inválido tras repair: ${second.error}`,
+          ),
       failCode,
       failMeta(),
     )
