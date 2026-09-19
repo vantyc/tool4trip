@@ -217,6 +217,46 @@ export const agentProposalSchema = z
         confidence: z.enum(['estimated', 'unverified', 'verified']).optional(),
       })
       .optional(),
+    /** Server-owned research coverage diagnostics (not LLM-authored). */
+    researchDiagnostics: z
+      .object({
+        goals: z
+          .array(
+            z
+              .object({
+                id: z.string().min(1),
+                kind: z.string().min(1),
+                label: z.string().min(1),
+                important: z.boolean(),
+                status: z.enum(['RESOLVED', 'PARTIAL', 'UNRESOLVED']),
+                evidenceNote: z.string().optional(),
+              })
+              .strict(),
+          )
+          .default([]),
+        candidates: z
+          .array(
+            z
+              .object({
+                url: z.string().min(1),
+                query: z.string().optional(),
+                goalIds: z.array(z.string()).default([]),
+                decision: z.enum(['accepted', 'rejected']),
+                reason: z.string().min(1),
+                note: z.string().optional(),
+              })
+              .strict(),
+          )
+          .default([]),
+        toolRounds: z.number().int().nonnegative(),
+        toolCallsUsed: z.number().int().nonnegative(),
+        maxToolCalls: z.number().int().positive(),
+        forcedExtraRounds: z.number().int().nonnegative(),
+        consultedSourceCount: z.number().int().nonnegative(),
+        anchoredSourceCount: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 

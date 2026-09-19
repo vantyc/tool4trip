@@ -264,6 +264,8 @@ function missingCard(id: string, kind: TripPanelCard['kind'], title: string): Tr
 export function computeTripPanelDiagnostics(input: {
   cards: TripPanelCard[]
   sourceUrls: string[]
+  /** Distinct URLs from toolTrace (consulted evidence). */
+  consultedSourceUrls?: string[]
   agentWarnings?: string[]
   nights?: number
   hasOutboundFlight: boolean
@@ -276,9 +278,17 @@ export function computeTripPanelDiagnostics(input: {
 }): TripPanelDiagnostics {
   const warnings: string[] = filterNonEmptyWarnings(input.agentWarnings)
   const sourceCount = input.sourceUrls.length
+  const consultedSourceCount = input.consultedSourceUrls
+    ? [...new Set(input.consultedSourceUrls)].length
+    : undefined
 
   if (sourceCount === 0) {
     warnings.push('Ausencia de fuentes: ninguna URL verificable en las opciones.')
+    if (consultedSourceCount && consultedSourceCount > 0) {
+      warnings.push(
+        `Evidencia consultada sin anclar: ${consultedSourceCount} URL(s) en toolTrace no asignadas a entidades (sourceUrl).`,
+      )
+    }
   }
 
   const priced = input.cards.filter(
@@ -418,6 +428,7 @@ export function computeTripPanelDiagnostics(input: {
     pendingCount,
     missingCount,
     sourceCount,
+    consultedSourceCount,
     warnings: uniq,
     needsCreateConfirm,
     integrityLight,
@@ -461,6 +472,7 @@ export function buildTripPanelFromPackage(
     budgetCurrency?: string
     budgetConfidence?: string
     includeTechnicalJson?: boolean
+    consultedSourceUrls?: string[]
   },
 ): TripPanelModel {
   const flights = pkg.travelOptions.filter((o) => o.type === 'flight')
@@ -562,6 +574,7 @@ export function buildTripPanelFromPackage(
   const diagnostics = computeTripPanelDiagnostics({
     cards,
     sourceUrls,
+    consultedSourceUrls: opts?.consultedSourceUrls,
     agentWarnings: filterNonEmptyWarnings(opts?.warnings),
     nights,
     hasOutboundFlight: flightsOut.length > 0,
@@ -634,6 +647,21 @@ export function buildTripPanelFromProposal(
   proposal: AgentProposal,
 ): TripPanelModel {
   const budget = proposal.estimatedCostDelta
+  const consultedSourceUrls = [
+    ...new Set(
+      (proposal.toolTrace ?? []).flatMap((t) =>
+        (t.sources ?? [])
+          .map((s) => s.url)
+          .filter((u): u is string => Boolean(u)),
+      ),
+    ),
+  ]
+  // Include fetchUrl args.url even when sources[] empty
+  for (const t of proposal.toolTrace ?? []) {
+    if (t.tool === 'fetchUrl' && typeof t.args?.url === 'string') {
+      consultedSourceUrls.push(t.args.url)
+    }
+  }
   return buildTripPanelFromPackage(proposal.package, {
     narrative: proposal.narrative,
     warnings: proposal.warnings,
@@ -642,6 +670,7 @@ export function buildTripPanelFromProposal(
     budgetCurrency: budget?.currency,
     budgetConfidence: budget?.confidence,
     includeTechnicalJson: true,
+    consultedSourceUrls: [...new Set(consultedSourceUrls)],
   })
 }
 

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ToolTraceEntry } from '../../shared/agentContracts.ts'
+import { scrubUnsupportedFreeTextAssertions } from './researchCoverage.ts'
 
 /**
  * What the LLM may emit for claims[] (no quotedFact — server-owned).
@@ -1338,16 +1339,24 @@ export function assertDraftGrounded(
     const concreteWarnings = scrubUngroundedConcreteFields(draft, {
       scrubItineraryClocks: true,
     })
+    const freeTextWarnings = scrubUnsupportedFreeTextAssertions(
+      draft,
+      toolTrace,
+    )
     if (!Array.isArray(draft.warnings)) draft.warnings = []
     if (!Array.isArray(draft.ops)) draft.ops = []
     const prev = (draft.warnings as unknown[]).filter(
       (w): w is string => typeof w === 'string' && w.trim().length > 0,
     )
-    draft.warnings = [...prev, ...concreteWarnings]
+    draft.warnings = [...prev, ...concreteWarnings, ...freeTextWarnings]
     return {
       ok: true,
       validClaims: valid,
-      serverWarnings: [...aggregateWarnings, ...concreteWarnings],
+      serverWarnings: [
+        ...aggregateWarnings,
+        ...concreteWarnings,
+        ...freeTextWarnings,
+      ],
       draft,
     }
   }

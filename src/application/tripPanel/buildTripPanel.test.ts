@@ -340,4 +340,25 @@ describe('tripPanel model', () => {
     assert.notEqual(card!.status, 'estimated')
     assert.notEqual(card!.status, 'pending')
   })
+
+  it('14: 0 option sources but toolTrace hits → consulted vs anchored distinguished', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    for (const o of pkg.travelOptions) {
+      delete (o as { sourceUrl?: string }).sourceUrl
+    }
+    const model = buildTripPanelFromPackage(pkg, {
+      consultedSourceUrls: [
+        'https://example.com/a',
+        'https://example.com/b',
+        'https://example.com/a',
+      ],
+    })
+    assert.equal(model.diagnostics.sourceCount, 0)
+    assert.equal(model.diagnostics.consultedSourceCount, 2)
+    assert.ok(
+      model.diagnostics.warnings.some((w) =>
+        /Evidencia consultada sin anclar: 2 URL/i.test(w),
+      ),
+    )
+  })
 })

@@ -117,6 +117,12 @@ export function IntegritySummary({
         <li>
           <strong>{diagnostics.sourceCount}</strong> fuentes
         </li>
+        {diagnostics.consultedSourceCount !== undefined &&
+          diagnostics.consultedSourceCount > diagnostics.sourceCount && (
+            <li className="muted">
+              <strong>{diagnostics.consultedSourceCount}</strong> consultadas
+            </li>
+          )}
       </ul>
       {diagnostics.warnings.filter((w) => w.trim()).length > 0 && (
         <details className="tp-integrity-warnings">

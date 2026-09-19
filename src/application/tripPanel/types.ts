@@ -67,7 +67,10 @@ export type TripPanelDiagnostics = {
   verifiedCount: number
   pendingCount: number
   missingCount: number
+  /** Anchored entity sourceUrls (travelOptions). */
   sourceCount: number
+  /** Distinct URLs seen in toolTrace (consulted, not necessarily anchored). */
+  consultedSourceCount?: number
   warnings: string[]
   /** True when Create should ask for draft confirmation. */
   needsCreateConfirm: boolean

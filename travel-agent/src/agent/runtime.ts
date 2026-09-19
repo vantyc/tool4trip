@@ -28,6 +28,17 @@ import {
 } from './prompts.ts'
 import { assertDraftGrounded, scrubUngroundedConcreteFields } from './claims.ts'
 import {
+  buildDirectedResearchNudge,
+  buildResearchDiagnostics,
+  deriveResearchGoals,
+  extractTripDatesFromPrompt,
+  scrubUnsupportedFreeTextAssertions,
+  shouldForceAnotherResearchRound,
+  assessResearchGoals,
+  type ResearchDiagnostics,
+  type ResearchGoal,
+} from './researchCoverage.ts'
+import {
   buildContextOnlyDraft,
   classifyAskIntent,
   tryContextAnswer,
@@ -349,7 +360,11 @@ export function hydrateProposal(
   raw: unknown,
   req: AgentAskRequest,
   toolTrace: ToolTraceEntry[],
-  opts?: { serverWarnings?: string[]; intent?: string },
+  opts?: {
+    serverWarnings?: string[]
+    intent?: string
+    researchDiagnostics?: ResearchDiagnostics
+  },
 ): unknown {
   const obj = asRecord(stripNulls(raw))
   // claims[] is internal to AgentRuntime — never part of public AgentProposal
@@ -403,6 +418,9 @@ export function hydrateProposal(
     coherenceWarnings.push(
       ...scrubUngroundedConcreteFields(wrap, { scrubItineraryClocks: true }),
     )
+    coherenceWarnings.push(
+      ...scrubUnsupportedFreeTextAssertions(wrap, toolTrace),
+    )
     pkg = asRecord(wrap.package)
     pkg = ensureNewTravelSkeleton(pkg, req.prompt)
     pkg = enrichPackageWithAirportArrivals(pkg)
@@ -429,6 +447,9 @@ export function hydrateProposal(
     proposalId: randomUUID(),
     createdAt: nowIso(),
     toolTrace,
+    ...(opts?.researchDiagnostics
+      ? { researchDiagnostics: opts.researchDiagnostics }
+      : {}),
     package: {
       ...pkg,
       schemaVersion: 1,
@@ -479,6 +500,7 @@ function tryParseProposal(
   req: AgentAskRequest,
   toolTrace: ToolTraceEntry[],
   intent?: string,
+  researchDiagnostics?: ResearchDiagnostics,
 ): ParseProposalResult {
   try {
     const raw = extractJsonObject(text)
@@ -510,6 +532,7 @@ function tryParseProposal(
     let hydrated: unknown = hydrateProposal(grounding.draft, req, toolTrace, {
       serverWarnings: dtWarnings,
       intent,
+      researchDiagnostics,
     })
     let parsed = agentProposalSchema.safeParse(hydrated)
 
@@ -600,6 +623,11 @@ export async function runAgentAsk(
   let llmCalls = 0
   let lastFinishReason: string | null = null
   let hadRepair = false
+  let toolRounds = 0
+  let forcedExtraRounds = 0
+  const researchGoalsSeed: ResearchGoal[] =
+    req.mode === 'new_travel' ? deriveResearchGoals(req.prompt) : []
+  const tripDates = extractTripDatesFromPrompt(req.prompt)
   const usage = emptyUsage()
 
   const failMeta = (): NonNullable<AgentRuntimeError['runMeta']> => ({
@@ -747,6 +775,7 @@ export async function runAgentAsk(
         messages.push(assistant)
 
         if (assistant.tool_calls?.length) {
+          toolRounds += 1
           for (const call of assistant.tool_calls) {
             if (toolCallsUsed >= deps.cfg.maxToolCalls) {
               const checkedAt = nowIso()
@@ -787,7 +816,55 @@ export async function runAgentAsk(
           continue
         }
 
-        // No tool calls → end tool loop
+        // No tool calls → maybe force another directed research round (new_travel)
+        if (intent === 'new_travel' && researchGoalsSeed.length > 0) {
+          const assessed = assessResearchGoals(
+            researchGoalsSeed,
+            toolTrace,
+            { tripDates },
+          )
+          const hasSuccessfulFetch = toolTrace.some(
+            (t) => t.tool === 'fetchUrl' && t.ok,
+          )
+          if (
+            shouldForceAnotherResearchRound({
+              goals: assessed,
+              toolCallsUsed,
+              maxToolCalls: deps.cfg.maxToolCalls,
+              steps,
+              maxSteps: deps.cfg.maxSteps,
+              forcedExtraRounds,
+              hasSuccessfulFetch,
+            })
+          ) {
+            forcedExtraRounds += 1
+            logJobEvent('research_coverage_nudge', {
+              jobId: deps.jobId ?? null,
+              requestId: deps.requestId ?? null,
+              tripId: deps.tripId ?? req.tripId,
+              forcedExtraRounds,
+              unresolved: assessed
+                .filter((g) => g.status === 'UNRESOLVED')
+                .map((g) => g.id)
+                .join(','),
+              partial: assessed
+                .filter((g) => g.status === 'PARTIAL')
+                .map((g) => g.id)
+                .join(','),
+              toolCallsUsed,
+            })
+            messages.push({
+              role: 'user',
+              content: buildDirectedResearchNudge({
+                goals: assessed,
+                toolTrace,
+                tripDates,
+              }),
+            })
+            continue
+          }
+        }
+
         break
       }
     }
@@ -796,6 +873,19 @@ export async function runAgentAsk(
     if (controller.signal.aborted) {
       throw new AgentRuntimeError('Agent timeout', 'llm_timeout', failMeta())
     }
+
+    const researchDiagnosticsPre =
+      intent === 'new_travel' && researchGoalsSeed.length > 0
+        ? buildResearchDiagnostics({
+            goals: researchGoalsSeed,
+            toolTrace,
+            toolRounds,
+            toolCallsUsed,
+            maxToolCalls: deps.cfg.maxToolCalls,
+            forcedExtraRounds,
+            tripDates,
+          })
+        : undefined
 
     messages.push({ role: 'user', content: buildFinalProposalPrompt(intent) })
     const finalResult = await chatLogged('final', {
@@ -824,10 +914,37 @@ export async function runAgentAsk(
       )
     }
 
-    const first = tryParseProposal(finalText, req, toolTrace, intent)
+    const finalizeDiagnostics = (
+      proposal: AgentProposal,
+    ): AgentProposal => {
+      if (intent !== 'new_travel' || researchGoalsSeed.length === 0) {
+        return researchDiagnosticsPre
+          ? { ...proposal, researchDiagnostics: researchDiagnosticsPre }
+          : proposal
+      }
+      const diag = buildResearchDiagnostics({
+        goals: researchGoalsSeed,
+        toolTrace,
+        toolRounds,
+        toolCallsUsed,
+        maxToolCalls: deps.cfg.maxToolCalls,
+        forcedExtraRounds,
+        package: proposal.package,
+        tripDates,
+      })
+      return { ...proposal, researchDiagnostics: diag }
+    }
+
+    const first = tryParseProposal(
+      finalText,
+      req,
+      toolTrace,
+      intent,
+      researchDiagnosticsPre,
+    )
     if (first.ok) {
       return {
-        proposal: first.proposal,
+        proposal: finalizeDiagnostics(first.proposal),
         meta: {
           steps,
           llmCalls,
@@ -865,10 +982,16 @@ export async function runAgentAsk(
     }
 
     const repairedText = repairResult.message.content?.trim() || ''
-    const second = tryParseProposal(repairedText, req, toolTrace, intent)
+    const second = tryParseProposal(
+      repairedText,
+      req,
+      toolTrace,
+      intent,
+      researchDiagnosticsPre,
+    )
     if (second.ok) {
       return {
-        proposal: second.proposal,
+        proposal: finalizeDiagnostics(second.proposal),
         meta: {
           steps,
           llmCalls,
