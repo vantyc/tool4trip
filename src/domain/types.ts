@@ -242,6 +242,7 @@ export type TravelOptionSourceType =
   | 'imported'
   | 'agent'
   | 'other'
+  | 'flight_schedule'
 
 /**
  * Lightweight researched option. Never treat researched/shortlisted/selected

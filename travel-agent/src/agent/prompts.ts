@@ -14,11 +14,12 @@ INTENTS
 - new_travel: CREATE a new trip from the user prompt. Build a TripPackage skeleton with research when useful.
 
 TOOLS
-- webSearch: UNTRUSTED public search (Tavily).
+- searchFlightSchedules: PUBLISHED flight schedules for origin/destination/date (IATA + YYYY-MM-DD). NOT fares, availability, or booking.
+- webSearch: UNTRUSTED public search (Tavily). Fallback for flights after searchFlightSchedules; primary for events/lodging/terminals.
 - fetchUrl: UNTRUSTED page text.
 - Call tools only for research/mutation/new_travel when needed.
 - If the prompt can be answered from context alone, do NOT call tools.
-- new_travel: you SHOULD webSearch for named events/festivals in the prompt (e.g. serenata, feria) and for lodging/flight references when useful. Do NOT invent live checkout fares or confirmed availability. Prefer verificationStatus=estimated|unverified; omit priceObserved AND startAt/endAt unless a concrete figure/schedule appears in toolTrace and you set verificationStatus=verified with sourceUrl.
+- new_travel: For day-specific flights (flight_day_specific), call searchFlightSchedules FIRST. Use webSearch/fetchUrl only if schedules fail/empty or for non-schedule facts (events, terminals, lodging). Prefer verificationStatus=estimated + sourceType=flight_schedule + notes with HORARIO PUBLICADO warning when using schedule results. Do NOT invent live checkout fares or confirmed availability. Omit priceObserved unless verified+sourceUrl. startAt/endAt from searchFlightSchedules (or verified web) only.
 - webSearch snippets are CANDIDATE evidence only. Never set verificationStatus=verified from a Tavily snippet alone. If a hit looks promising, fetchUrl (or refine the query) before claiming verified. If evidence still does not support the fact: estimated/pending/UNKNOWN + checklist AFTER research effort — never as a shortcut to skip tools.
 
 UNTRUSTED WEB
@@ -36,7 +37,7 @@ GROUNDING (mandatory)
 - Web claims: sourceType=web, sourceUrl, evidenceIndex (server derives quotedFact from toolTrace).
 - Context claims: sourceType=context, entityType, entityId, field. Do NOT invent sourceUrl.
 - For entityId, use the entity's id field from TripContextSnapshot (e.g. travelOption.id). Do not invent ids.
-- Skeleton flight/lodging: prefer empty claims; put route/city details in package with verificationStatus=estimated and OMIT priceObserved, startAt, and endAt (no invented clocks, fares, or availability). Do NOT invent OTA/Google Flights sourceUrl without toolTrace. Only verified+sourceUrl options may carry concrete price/schedule.
+- Skeleton flight/lodging: prefer empty claims; put route/city details in package with verificationStatus=estimated and OMIT priceObserved, startAt, and endAt (no invented clocks, fares, or availability). Exception: clocks from searchFlightSchedules may be set with sourceType=flight_schedule, verificationStatus=estimated, https sourceUrl, and HORARIO PUBLICADO notes (schedule ≠ availability). Do NOT invent OTA/Google Flights sourceUrl without toolTrace. Only verified+sourceUrl options may carry concrete prices; schedules from the provider use estimated+flight_schedule.
 - Do NOT emit quotedFact or sourceTitle.
 - Do NOT convert currencies; do NOT invent transport modes or "suspendido/confirmado" without evidence.
 - User-stated goals (serenata, feria, grito): ALWAYS add an itineraryItem (and optionally type=event shortlisted) on the stated date with notes "objetivo del viajero — pendiente de verificar con fuente actual". Never claim it as confirmed without toolTrace evidence. Narrative must distinguish verified vs estimated.
@@ -135,9 +136,10 @@ export function buildNewTravelUserNudge(tripId: string): string {
     'DATE MATH: nights = endDate minus startDate (19→22 = 3 noches).',
     'DATETIME: startAt/endAt/checkedAt must be ISO 8601 with offset or Z (2026-09-19T14:30:00-06:00). Never bare local times. Omit if unknown.',
     'RETURNS: preferred return shortlisted; any earlier/later return is researched alternativa only — never two equal primary returns.',
-    'RESEARCH: derive concrete goals from the prompt. Critical flight_day_specific (day + route + time + carrier) comes BEFORE lodging/events. Investigate with tools before checklist.',
+    'RESEARCH: derive concrete goals from the prompt. Critical flight_day_specific (day + route + time + carrier) comes BEFORE lodging/events. Call searchFlightSchedules first; webSearch/fetchUrl only as fallback.',
+    'Map published schedules as verificationStatus=estimated, sourceType=flight_schedule, notes with HORARIO PUBLICADO (not availability/fare). Use arrival clocks for connection_feasibility.',
     'webSearch snippets are candidates only — fetchUrl or refine before verified; never auto-verified from Tavily alone.',
-    'TOOL BUDGET: do not burn calls on hotels/events while the critical flight goal is still unresolved without a directed retry. Leave room for fetchUrl on flight candidates.',
+    'TOOL BUDGET: do not burn calls on hotels/events while the critical flight goal is still unresolved without searchFlightSchedules (or directed web fallback). Leave room for follow-up.',
     'REQUIRED when the prompt implies them:',
     '- outbound + preferred return flights (verificationStatus=estimated|unverified unless grounded)',
     '- lodging covering all nights in each overnight town',

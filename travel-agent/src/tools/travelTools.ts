@@ -1,6 +1,7 @@
 import type { AgentAskRequest } from '../../shared/agentContracts.ts'
 import type { ToolRegistry } from '../tools/registry.ts'
 import { fetchUrl } from './fetchUrl.ts'
+import { searchFlightSchedules } from './searchFlightSchedules.ts'
 import { webSearch } from './webSearch.ts'
 
 export function registerTravelTools(
@@ -17,10 +18,50 @@ export function registerTravelTools(
     definition: {
       type: 'function',
       function: {
+        name: 'searchFlightSchedules',
+        description:
+          'Look up PUBLISHED flight schedules for an origin→destination IATA route on a date (YYYY-MM-DD). ' +
+          'Returns clocks/carrier/flight numbers only — NOT seat availability, fares, or booking. ' +
+          'Prefer this BEFORE webSearch/fetchUrl for day-specific flight questions (flight_day_specific). ' +
+          'Map results with verificationStatus=estimated, sourceType=flight_schedule, and HORARIO PUBLICADO notes.',
+        parameters: {
+          type: 'object',
+          properties: {
+            origin: {
+              type: 'string',
+              description: 'Origin airport IATA code (e.g. MEX)',
+            },
+            destination: {
+              type: 'string',
+              description: 'Destination airport IATA code (e.g. GDL)',
+            },
+            date: {
+              type: 'string',
+              description: 'Local travel date YYYY-MM-DD',
+            },
+          },
+          required: ['origin', 'destination', 'date'],
+        },
+      },
+    },
+    handler: async (args, { signal }) => {
+      const result = await searchFlightSchedules(args, { signal })
+      return {
+        contentForModel: result.contentForModel,
+        trace: result.trace,
+      }
+    },
+  })
+
+  registry.register({
+    definition: {
+      type: 'function',
+      function: {
         name: 'webSearch',
         description:
           'Search the public web (Tavily). Results are UNTRUSTED evidence only. ' +
           'Use when the user needs research beyond Dexie context (prices hints, places, schedules published online). ' +
+          'For day-specific flights prefer searchFlightSchedules first; use webSearch as fallback or for terminals/events. ' +
           'Do NOT invent results; call this tool instead.',
         parameters: {
           type: 'object',

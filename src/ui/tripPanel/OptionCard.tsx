@@ -104,6 +104,13 @@ export function FlightCard({
       rows.push({ label: 'Horario', value: 'Pendiente de verificar' })
     }
   }
+  if (card.sourceType === 'flight_schedule') {
+    rows.push({
+      label: 'Tipo',
+      value:
+        'HORARIO PUBLICADO — verifica disponibilidad y reserva con la aerolínea',
+    })
+  }
   if (card.origin) rows.push({ label: 'Origen', value: card.origin })
   if (card.destination) rows.push({ label: 'Destino', value: card.destination })
   if (card.provider) rows.push({ label: 'Aerolínea', value: card.provider })

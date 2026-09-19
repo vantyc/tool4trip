@@ -65,6 +65,12 @@ spec:
                   name: travel-agent-llm
                   key: TAVILY_API_KEY
                   optional: true
+            - name: AERODATABOX_RAPIDAPI_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aerodatabox-secret
+                  key: AERODATABOX_RAPIDAPI_KEY
+                  optional: true
           readinessProbe:
             httpGet:
               path: /healthz

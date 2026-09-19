@@ -45,6 +45,7 @@ import {
   tryContextAnswer,
 } from './intent.ts'
 import { enrichPackageWithAirportArrivals } from './airportArrivalEnrich.ts'
+import { mergePublishedSchedulesFromTrace } from '../flights/mergeSchedules.ts'
 import {
   formatProposalValidationUserError,
   normalizeProposalDatetimes,
@@ -222,7 +223,8 @@ export function sanitizePackageCollections(pkg: Record<string, unknown>): {
       sourceTypeRaw === 'manual' ||
       sourceTypeRaw === 'imported' ||
       sourceTypeRaw === 'agent' ||
-      sourceTypeRaw === 'other'
+      sourceTypeRaw === 'other' ||
+      sourceTypeRaw === 'flight_schedule'
         ? sourceTypeRaw
         : 'agent'
     const out: Record<string, unknown> = {
@@ -423,6 +425,9 @@ export function hydrateProposal(
       ...scrubUnsupportedFreeTextAssertions(wrap, toolTrace),
     )
     pkg = asRecord(wrap.package)
+    const merged = mergePublishedSchedulesFromTrace(pkg, toolTrace)
+    pkg = merged.package
+    coherenceWarnings.push(...merged.warnings)
     pkg = ensureNewTravelSkeleton(pkg, req.prompt)
     pkg = enrichPackageWithAirportArrivals(pkg)
     coherenceWarnings.push(
@@ -787,18 +792,28 @@ export async function runAgentAsk(
               ? Math.min(2, Math.max(0, deps.cfg.maxToolCalls - 2))
               : 0
           const softCap = deps.cfg.maxToolCalls - reserveForCoverage
-          // After a coverage nudge, prefer fetchUrl before extra webSearch so
-          // remaining budget is spent on promising candidates first.
+          // Prefer searchFlightSchedules, then fetchUrl, before extra webSearch.
           const orderedCalls = [...assistant.tool_calls]
           if (forcedExtraRounds > 0 || reserveForCoverage > 0) {
             orderedCalls.sort((a, b) => {
-              const af = a.function.name === 'fetchUrl' ? 0 : 1
-              const bf = b.function.name === 'fetchUrl' ? 0 : 1
-              return af - bf
+              const rank = (name: string) =>
+                name === 'searchFlightSchedules'
+                  ? 0
+                  : name === 'fetchUrl'
+                    ? 1
+                    : 2
+              return rank(a.function.name) - rank(b.function.name)
+            })
+          } else {
+            orderedCalls.sort((a, b) => {
+              const rank = (name: string) =>
+                name === 'searchFlightSchedules' ? 0 : 1
+              return rank(a.function.name) - rank(b.function.name)
             })
           }
           for (const call of orderedCalls) {
             const isFetch = call.function.name === 'fetchUrl'
+            const isSchedule = call.function.name === 'searchFlightSchedules'
             // Defer lodging/event tools while critical flight attempt unfinished
             if (
               intent === 'new_travel' &&
@@ -820,7 +835,7 @@ export async function runAgentAsk(
                 ok: false,
                 sources: [],
                 error:
-                  'deferred: critical flight_day_specific still needs directed research before lodging/events',
+                  'deferred: critical flight_day_specific still needs searchFlightSchedules (or directed web fallback) before lodging/events',
                 checkedAt,
               }
               toolTrace.push(skipTrace)
@@ -831,18 +846,18 @@ export async function runAgentAsk(
                 content: JSON.stringify({
                   UNTRUSTED_CONTENT: true,
                   error: skipTrace.error,
-                  hint: 'Run directed MEX→GDL day-specific / carrier webSearch or fetchUrl on a flight candidate first.',
+                  hint: 'Call searchFlightSchedules({ origin, destination, date }) first; webSearch/fetchUrl only as fallback after schedules.',
                 }),
               })
               continue
             }
             const atHardCap = toolCallsUsed >= deps.cfg.maxToolCalls
-            // Reserved slots are for fetchUrl (or post-nudge directed work).
-            // Non-fetch tools stop at softCap while reserve is active.
+            // Reserved slots are for schedule search / fetchUrl (or post-nudge directed work).
             const blockedByReserve =
               reserveForCoverage > 0 &&
               toolCallsUsed >= softCap &&
-              !isFetch
+              !isFetch &&
+              !isSchedule
             if (atHardCap || blockedByReserve) {
               const checkedAt = nowIso()
               const reserved =

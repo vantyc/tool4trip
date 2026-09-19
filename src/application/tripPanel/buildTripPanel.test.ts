@@ -361,4 +361,31 @@ describe('tripPanel model', () => {
       ),
     )
   })
+
+  it('15: flight_schedule retains clocks and is HORARIO PUBLICADO (not fare)', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    const flt = pkg.travelOptions.find((o) => o.type === 'flight')
+    assert.ok(flt)
+    flt!.sourceType = 'flight_schedule'
+    flt!.verificationStatus = 'estimated'
+    flt!.startAt = '2026-09-19T06:00:00-06:00'
+    flt!.endAt = '2026-09-19T07:18:00-06:00'
+    flt!.provider = 'Volaris'
+    flt!.sourceUrl =
+      'https://aerodatabox.com/?origin=MEX&destination=GDL&date=2026-09-19&flight=Y4140'
+    flt!.notes =
+      'HORARIO PUBLICADO — verifica disponibilidad y reserva directamente con la aerolínea.'
+    flt!.priceObserved = undefined
+    const model = buildTripPanelFromPackage(pkg)
+    const card = [...model.flightsOut, ...model.flightsReturn].find(
+      (c) => c.externalId === flt!.externalId,
+    )
+    assert.ok(card)
+    assert.equal(card!.status, 'estimated')
+    assert.equal(card!.startAt, '2026-09-19T06:00:00-06:00')
+    assert.equal(card!.endAt, '2026-09-19T07:18:00-06:00')
+    assert.equal(card!.sourceType, 'flight_schedule')
+    assert.equal(card!.price, undefined)
+    assert.match(card!.notes ?? '', /HORARIO PUBLICADO/)
+  })
 })

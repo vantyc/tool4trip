@@ -749,6 +749,19 @@ export function optionAnchorsGoal(
   })()
 
   if (!kindOk) return null
+  // Published schedule provider: estimated + flight_schedule + clocks + carrier + https
+  if (goal.kind === 'flight_day_specific') {
+    const provider = String(opt.provider ?? opt.carrier ?? '').trim()
+    if (
+      String(opt.sourceType ?? '') === 'flight_schedule' &&
+      (v === 'estimated' || v === 'verified') &&
+      flightOptionHasConcreteArrival(opt) &&
+      provider &&
+      /^https?:\/\//i.test(url)
+    ) {
+      return 'RESOLVED'
+    }
+  }
   if (v === 'verified' && /^https?:\/\//i.test(url)) return 'RESOLVED'
   if (/^https?:\/\//i.test(url)) return 'PARTIAL'
   return null
@@ -843,6 +856,23 @@ export function assessResearchGoals(
     }
 
     if (status === 'UNRESOLVED') {
+      // Published schedule tool results count as PARTIAL until package-anchored
+      if (
+        g.kind === 'flight_day_specific' &&
+        toolTrace.some(
+          (t) =>
+            t.tool === 'searchFlightSchedules' &&
+            t.ok &&
+            (t.sources?.length ?? 0) > 0,
+        )
+      ) {
+        status = 'PARTIAL'
+        evidenceNote =
+          'searchFlightSchedules returned published schedules — map into flight options (estimated + flight_schedule)'
+      }
+    }
+
+    if (status === 'UNRESOLVED') {
       const related = candidates.filter(
         (c) => c.goalIds.includes(g.id) && c.decision === 'accepted',
       )
@@ -893,6 +923,14 @@ export function countFlightWebSearches(toolTrace: ToolTraceEntry[]): number {
       typeof t.args?.query === 'string' &&
       isFlightResearchQuery(t.args.query),
   ).length
+}
+
+export function countScheduleSearches(toolTrace: ToolTraceEntry[]): number {
+  return toolTrace.filter((t) => t.tool === 'searchFlightSchedules').length
+}
+
+export function hasScheduleSearchAttempt(toolTrace: ToolTraceEntry[]): boolean {
+  return countScheduleSearches(toolTrace) >= 1
 }
 
 export function countDirectedFlightRetries(toolTrace: ToolTraceEntry[]): number {
@@ -969,6 +1007,8 @@ export function needsFlightDirectedRetry(input: {
   const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
   if (!flight) return false
   if (flight.status === 'RESOLVED') return false
+  // Prefer searchFlightSchedules before any web directed retry
+  if (!hasScheduleSearchAttempt(input.toolTrace)) return true
   if (countFlightWebSearches(input.toolTrace) < 1) return false
   if (countDirectedFlightRetries(input.toolTrace) >= 1) return false
   // Already have day-specific candidate text somewhere
@@ -1015,6 +1055,8 @@ export function flightCriticalAttemptExhausted(input: {
   const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
   if (!flight) return true
   if (flight.status === 'RESOLVED' || flight.status === 'PARTIAL') return true
+  // One schedule-provider attempt (ok or empty/error) unlocks web fallback / secondary
+  if (hasScheduleSearchAttempt(input.toolTrace)) return true
   for (const t of input.toolTrace) {
     for (const s of t.sources ?? []) {
       if (
@@ -1066,6 +1108,20 @@ export function shouldSkipToolCallForFlightPriority(input: {
   toolTrace: ToolTraceEntry[]
   tripDates: string[]
 }): boolean {
+  if (input.toolName === 'searchFlightSchedules') return false
+
+  const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
+  if (
+    flight &&
+    flight.status !== 'RESOLVED' &&
+    !hasScheduleSearchAttempt(input.toolTrace) &&
+    (input.toolName === 'webSearch' || input.toolName === 'fetchUrl') &&
+    !flightCriticalAttemptExhausted(input)
+  ) {
+    // Force schedule provider before more web/fetch while critical attempt open
+    return true
+  }
+
   if (!shouldDeferSecondaryResearch(input)) return false
   if (input.toolName === 'webSearch') {
     let query = ''
@@ -1182,19 +1238,28 @@ export function buildDirectedResearchNudge(input: {
     const flightCands = candidates.filter((c) =>
       c.goalIds.some((id) => id.includes('flight')),
     )
+    const needSchedule = !hasScheduleSearchAttempt(input.toolTrace)
     const lines: string[] = [
-      'RESEARCH COVERAGE GATE (server): critical goal flight_day_specific remains UNRESOLVED after a generic search.',
+      'RESEARCH COVERAGE GATE (server): critical goal flight_day_specific remains UNRESOLVED.',
       'Do NOT spend tool budget on lodging/hotels/events yet.',
       'Snippets are candidates only — never verificationStatus=verified from a Tavily snippet alone.',
       'Do NOT repeat prior webSearch queries verbatim.',
       '',
       'Required now (pick within remaining budget):',
-      ...suggested.map((q) => `- webSearch: ${q}`),
-      '- If a candidate URL looks day-specific, fetchUrl it BEFORE lodging searches.',
+      ...(needSchedule
+        ? [
+            '- Call searchFlightSchedules({ origin, destination, date }) FIRST (published schedules; not fares/availability).',
+            '- Map results as verificationStatus=estimated, sourceType=flight_schedule, notes with HORARIO PUBLICADO warning.',
+            '- Only if searchFlightSchedules fails/empty: fall back to webSearch/fetchUrl for day-specific schedules.',
+          ]
+        : [
+            ...suggested.map((q) => `- webSearch: ${q}`),
+            '- If a candidate URL looks day-specific, fetchUrl it BEFORE lodging searches.',
+          ]),
       '',
-      'Success criteria for flight_day_specific (does NOT auto-verify):',
+      'Success criteria for flight_day_specific (does NOT auto-verify booking):',
       'origin + destination + requested date + concrete departureTime + carrier + https sourceUrl.',
-      'If evidence cannot support that, leave UNRESOLVED — do not invent schedules.',
+      'Prefer searchFlightSchedules → estimated + flight_schedule (HORARIO PUBLICADO). Never invent schedules.',
     ]
     if (flightCands.length) {
       lines.push('', 'Promising flight URLs to fetchUrl:')

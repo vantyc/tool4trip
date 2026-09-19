@@ -1085,7 +1085,16 @@ export function applyClaimsSourceOfTruth(
 export function hasScheduleProvenance(rec: Record<string, unknown>): boolean {
   const status = typeof rec.verificationStatus === 'string' ? rec.verificationStatus : ''
   const url = typeof rec.sourceUrl === 'string' ? rec.sourceUrl.trim() : ''
-  return status === 'verified' && /^https?:\/\//i.test(url)
+  if (!/^https?:\/\//i.test(url)) return false
+  // Published schedule API: clocks allowed with estimated + flight_schedule
+  // (NOT availability/fare — still never treat as verified booking).
+  if (
+    status === 'estimated' &&
+    String(rec.sourceType ?? '') === 'flight_schedule'
+  ) {
+    return true
+  }
+  return status === 'verified'
 }
 
 export function hasPriceProvenance(rec: Record<string, unknown>): boolean {

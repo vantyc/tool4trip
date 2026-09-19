@@ -498,12 +498,19 @@ export function buildTripPanelFromPackage(
       verificationStatus: undefined as string | undefined,
       sourceUrl: undefined as string | undefined,
     }))
-  const flightsOut = outbound.map((o) => optionToCard(o, 'flight_out'))
+  const flightsOut = outbound.map((o) =>
+    optionToCard(o, 'flight_out', {
+      retainSchedule: o.sourceType === 'flight_schedule',
+    }),
+  )
   const flightsReturn = returns.map((o) => {
-    const c = optionToCard(o, 'flight_return')
+    const c = optionToCard(o, 'flight_return', {
+      retainSchedule: o.sourceType === 'flight_schedule',
+    })
     if (isAlternative(o)) c.status = 'alternative'
     // Alternative inherits soft status → no concrete clocks/prices
-    if (c.status === 'alternative') {
+    // (published schedules are not "alternatives" in this sense)
+    if (c.status === 'alternative' && o.sourceType !== 'flight_schedule') {
       delete c.startAt
       delete c.endAt
       delete c.price

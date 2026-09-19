@@ -33,6 +33,14 @@ kubectl apply -f "$ROOT/deploy/k3s/tool4trip/09-postgres.yaml"
 kubectl apply -f "$ROOT/deploy/k3s/tool4trip/10-trip-api.yaml"
 kubectl apply -f "$ROOT/deploy/k3s/tool4trip/06-ingress.yaml"
 
+# AeroDataBox schedule secret + travel-agent Deployment (env wiring)
+if [[ -f "$ROOT/k8s/secrets/aerodatabox-secret.yaml" ]]; then
+  kubectl apply -f "$ROOT/k8s/secrets/aerodatabox-secret.yaml"
+else
+  echo "WARN: k8s/secrets/aerodatabox-secret.yaml missing — AERODATABOX_RAPIDAPI_KEY will be empty until secret exists"
+fi
+kubectl apply -f "$ROOT/deploy/k3s/tool4trip/07-travel-agent.yaml"
+
 kubectl -n "$NS" rollout status statefulset/postgres --timeout=300s
 kubectl -n "$NS" rollout restart deploy/trip-api deploy/travel-agent deploy/tool4trip-web
 kubectl -n "$NS" rollout status deploy/trip-api --timeout=180s

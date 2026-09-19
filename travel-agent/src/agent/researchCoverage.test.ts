@@ -322,7 +322,7 @@ describe('researchCoverage', () => {
     assert.match(nudge, /flight_day_specific|Do NOT spend tool budget on lodging/i)
     assert.match(nudge, /Do NOT repeat prior webSearch queries/i)
     assert.match(nudge, new RegExp(prior.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-    assert.match(nudge, /Aeromexico|Volaris|flight schedule/i)
+    assert.match(nudge, /searchFlightSchedules|Aeromexico|Volaris|flight schedule/i)
   })
 
   it('A: first flight search wrong_date/generic → directed flight retry BEFORE lodging', () => {
@@ -367,6 +367,7 @@ describe('researchCoverage', () => {
       }),
       true,
     )
+    // Until searchFlightSchedules runs, even flight webSearch is deferred
     assert.equal(
       shouldSkipToolCallForFlightPriority({
         toolName: 'webSearch',
@@ -374,6 +375,46 @@ describe('researchCoverage', () => {
           query: 'MEX GDL 19 Sep 2026 Volaris',
         }),
         goals: assessed,
+        toolTrace,
+        tripDates: ['2026-09-19'],
+      }),
+      true,
+    )
+    assert.equal(
+      shouldSkipToolCallForFlightPriority({
+        toolName: 'searchFlightSchedules',
+        argsJson: JSON.stringify({
+          origin: 'MEX',
+          destination: 'GDL',
+          date: '2026-09-19',
+        }),
+        goals: assessed,
+        toolTrace,
+        tripDates: ['2026-09-19'],
+      }),
+      false,
+    )
+  })
+
+  it('after searchFlightSchedules, flight webSearch fallback allowed; lodging still deferred if unresolved', () => {
+    const goals = deriveResearchGoals(SMA_PROMPT).map((g) =>
+      g.kind === 'flight_day_specific' ? { ...g, status: 'UNRESOLVED' as const } : g,
+    )
+    const toolTrace = [
+      {
+        tool: 'searchFlightSchedules',
+        args: { origin: 'MEX', destination: 'GDL', date: '2026-09-19', flights: [] },
+        ok: true,
+        sources: [],
+        checkedAt: '2026-09-19T12:00:00+00:00',
+      },
+    ]
+    // Empty schedule → exhausted → secondary lodging may proceed; flight web ok
+    assert.equal(
+      shouldSkipToolCallForFlightPriority({
+        toolName: 'webSearch',
+        argsJson: JSON.stringify({ query: 'MEX GDL 19 Sep 2026 Volaris' }),
+        goals,
         toolTrace,
         tripDates: ['2026-09-19'],
       }),

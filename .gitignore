@@ -28,6 +28,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# Local k8s secrets (never commit real keys)
+k8s/secrets/
+
 # Personal research TripPackages (real trips; keep local)
 imports/
 

@@ -659,6 +659,22 @@ describe('day-specific flight ask vs weekly aggregate', () => {
             sourceType: 'agent',
           },
           {
+            externalId: 'flt-sched',
+            type: 'flight',
+            status: 'shortlisted',
+            title: 'MEX→GDL horario publicado',
+            origin: 'MEX',
+            destination: 'GDL',
+            startAt: '2026-09-19T06:00:00-06:00',
+            endAt: '2026-09-19T07:18:00-06:00',
+            provider: 'Volaris',
+            verificationStatus: 'estimated',
+            sourceType: 'flight_schedule',
+            sourceUrl:
+              'https://aerodatabox.com/?origin=MEX&destination=GDL&date=2026-09-19&flight=Y4140',
+            notes: 'HORARIO PUBLICADO',
+          },
+          {
             externalId: 'flt-ver',
             type: 'flight',
             status: 'shortlisted',
@@ -697,10 +713,14 @@ describe('day-specific flight ask vs weekly aggregate', () => {
       }
     ).travelOptions
     const est = opts.find((o) => o.externalId === 'flt-est')!
+    const sched = opts.find((o) => o.externalId === 'flt-sched')!
     const ver = opts.find((o) => o.externalId === 'flt-ver')!
     assert.equal(est.startAt, undefined)
     assert.equal(est.priceObserved, undefined)
     assert.equal(est.currency, undefined)
+    assert.equal(sched.startAt, '2026-09-19T06:00:00-06:00')
+    assert.equal(sched.endAt, '2026-09-19T07:18:00-06:00')
+    assert.equal(sched.sourceType, 'flight_schedule')
     assert.equal(ver.startAt, '2026-09-19T11:00:00-06:00')
     assert.equal(ver.priceObserved, 1800)
     const itin = (
