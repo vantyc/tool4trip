@@ -710,6 +710,61 @@ describe('day-specific flight ask vs weekly aggregate', () => {
     assert.match(String(itin.notes), /2026-09-20/)
   })
 
+  it('new_travel skeleton drops invalid evidenceIndex claims instead of failing closed', () => {
+    const url = 'https://example.com/hotel'
+    const toolTrace = [
+      {
+        tool: 'webSearch' as const,
+        args: { query: 'hotel', provider: 'tavily' },
+        ok: true,
+        sources: [{ url, title: 'Hotel', snippet: 'Hotel San Miguel contacto' }],
+        checkedAt: '2026-09-19T18:00:00+00:00',
+      },
+    ]
+    const draft = {
+      narrative: 'Viaje.',
+      warnings: [],
+      claims: [
+        {
+          kind: 'other_factual',
+          statement: 'Hotel San Miguel',
+          sourceType: 'web',
+          sourceUrl: url,
+          evidenceIndex: 1, // out of range — only 1 source at URL
+          verificationStatus: 'verified',
+          confidence: 'high',
+        },
+      ],
+      package: {
+        travelOptions: [
+          {
+            externalId: 'lodge-1',
+            type: 'lodging',
+            status: 'researched',
+            title: 'Hotel San Miguel',
+            verificationStatus: 'estimated',
+            sourceType: 'agent',
+          },
+        ],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+      },
+      ops: [],
+    }
+    const g = assertDraftGrounded(draft, toolTrace, undefined, {
+      allowSkeletonPackage: true,
+    })
+    assert.equal(g.ok, true)
+    if (!g.ok) throw new Error('expected ok')
+    assert.equal((g.draft.claims as unknown[]).length, 0)
+    assert.ok(
+      g.serverWarnings.some((w) =>
+        /claim\[0\] no grounded \(evidence_index_invalid\)/.test(w),
+      ),
+    )
+  })
+
   it('scrubUngroundedConcreteFields is idempotent on already-clean package', () => {
     const draft = {
       package: {

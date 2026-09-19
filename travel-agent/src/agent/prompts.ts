@@ -137,6 +137,7 @@ export function buildNewTravelUserNudge(tripId: string): string {
     'RETURNS: preferred return shortlisted; any earlier/later return is researched alternativa only — never two equal primary returns.',
     'RESEARCH: derive concrete goals from the prompt (flights day-specific, terminals, connection feasibility, lodging, events). Investigate with tools before checklist.',
     'webSearch snippets are candidates only — fetchUrl or refine before verified; never auto-verified from Tavily alone.',
+    'TOOL BUDGET: do not burn all webSearch calls in the first parallel batch — leave room for fetchUrl or refined queries on open goals.',
     'REQUIRED when the prompt implies them:',
     '- outbound + preferred return flights (verificationStatus=estimated|unverified unless grounded)',
     '- lodging covering all nights in each overnight town',

@@ -776,15 +776,30 @@ export async function runAgentAsk(
 
         if (assistant.tool_calls?.length) {
           toolRounds += 1
+          // Reserve tool budget for a directed follow-up round when important
+          // research goals are still open (avoids burning maxToolCalls on the
+          // first parallel webSearch batch).
+          const reserveForCoverage =
+            intent === 'new_travel' &&
+            researchGoalsSeed.length > 0 &&
+            forcedExtraRounds === 0
+              ? Math.min(2, Math.max(0, deps.cfg.maxToolCalls - 2))
+              : 0
+          const softCap = deps.cfg.maxToolCalls - reserveForCoverage
           for (const call of assistant.tool_calls) {
-            if (toolCallsUsed >= deps.cfg.maxToolCalls) {
+            if (toolCallsUsed >= softCap) {
               const checkedAt = nowIso()
+              const reserved =
+                reserveForCoverage > 0 &&
+                toolCallsUsed < deps.cfg.maxToolCalls
               const skipTrace: ToolTraceEntry = {
                 tool: call.function.name,
                 args: { skipped: true },
                 ok: false,
                 sources: [],
-                error: `AGENT_MAX_TOOL_CALLS=${deps.cfg.maxToolCalls} exceeded`,
+                error: reserved
+                  ? `tool budget reserved for directed research follow-up (${reserveForCoverage} call(s) held; used ${toolCallsUsed}/${deps.cfg.maxToolCalls})`
+                  : `AGENT_MAX_TOOL_CALLS=${deps.cfg.maxToolCalls} exceeded`,
                 checkedAt,
               }
               toolTrace.push(skipTrace)
@@ -795,6 +810,9 @@ export async function runAgentAsk(
                 content: JSON.stringify({
                   UNTRUSTED_CONTENT: true,
                   error: skipTrace.error,
+                  hint: reserved
+                    ? 'Next: fetchUrl on a promising candidate OR a refined day-specific/terminal/event query. Do not repeat prior queries.'
+                    : undefined,
                 }),
               })
               continue

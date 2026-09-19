@@ -1281,13 +1281,20 @@ export function assertDraftGrounded(
     const warnings = parseViolations.map(
       (v) => `server: claim[${v.index}] inválido — ${v.message}`,
     )
-    return {
-      ok: false,
-      code: 'ungrounded_claims',
-      message: `ungrounded_claims: ${parseViolations.length} claim(s) failed schema`,
-      warnings,
-      violations: parseViolations,
-      uncoveredSignals: [],
+    // new_travel skeleton: drop schema-invalid claims; continue with any
+    // that parsed (none here if all invalid).
+    if (opts?.allowSkeletonPackage) {
+      draft.claims = llmClaims
+      // fall through to validate remaining (possibly empty) claims
+    } else {
+      return {
+        ok: false,
+        code: 'ungrounded_claims',
+        message: `ungrounded_claims: ${parseViolations.length} claim(s) failed schema`,
+        warnings,
+        violations: parseViolations,
+        uncoveredSignals: [],
+      }
     }
   }
 
@@ -1296,16 +1303,65 @@ export function assertDraftGrounded(
     toolTrace,
     context,
   )
-  if (invalid.length) {
-    const warnings = invalid.map(
-      (v) =>
-        `server: claim[${v.index}] no grounded (${v.code}) — ${v.message}`,
-    )
+  if (invalid.length || (parseViolations.length && opts?.allowSkeletonPackage)) {
+    const warnings = [
+      ...parseViolations.map(
+        (v) => `server: claim[${v.index}] inválido — ${v.message}`,
+      ),
+      ...invalid.map(
+        (v) =>
+          `server: claim[${v.index}] no grounded (${v.code}) — ${v.message}`,
+      ),
+    ]
+    // new_travel skeleton: drop ungrounded/invalid claims and continue (same as
+    // emitting no claims). Do NOT fail the whole job — verified rules still
+    // apply to any claim that remains.
+    if (opts?.allowSkeletonPackage) {
+      const filtered = filterAggregateFlightClaims(validated, opts?.userPrompt)
+      const valid = filtered.kept
+      draft.claims = valid
+      const concreteWarnings = scrubUngroundedConcreteFields(draft, {
+        scrubItineraryClocks: true,
+      })
+      const freeTextWarnings = scrubUnsupportedFreeTextAssertions(
+        draft,
+        toolTrace,
+      )
+      if (!Array.isArray(draft.warnings)) draft.warnings = []
+      if (!Array.isArray(draft.ops)) draft.ops = []
+      const prev = (draft.warnings as unknown[]).filter(
+        (w): w is string => typeof w === 'string' && w.trim().length > 0,
+      )
+      const dropped = invalid.length + parseViolations.length
+      const dropNote = `server: ${dropped} claim(s) descartado(s) por grounding (skeleton); no se promocionan a verified.`
+      draft.warnings = [
+        ...prev,
+        dropNote,
+        ...warnings,
+        ...concreteWarnings,
+        ...freeTextWarnings,
+      ]
+      return {
+        ok: true,
+        validClaims: valid,
+        serverWarnings: [
+          ...filtered.warnings,
+          dropNote,
+          ...warnings,
+          ...concreteWarnings,
+          ...freeTextWarnings,
+        ],
+        draft,
+      }
+    }
     return {
       ok: false,
       code: 'ungrounded_claims',
       message: `ungrounded_claims: ${invalid.map((v) => v.code).join(', ')}`,
-      warnings,
+      warnings: invalid.map(
+        (v) =>
+          `server: claim[${v.index}] no grounded (${v.code}) — ${v.message}`,
+      ),
       violations: invalid,
       uncoveredSignals: [],
     }
