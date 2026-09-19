@@ -244,11 +244,27 @@ export function createPackageImportService(repos: Repositories) {
     /**
      * Dry-run counts for preview (new / updated / unchanged / decisions kept).
      * Does not write.
+     *
+     * When the packageId has never been imported, all options are "created"
+     * without probing /api/travel-options/:id (those GETs would 404 for every
+     * option on a brand-new Nuevo viaje / first import).
      */
     planImport: async (pkg: TripPackageV1): Promise<ImportUpdatePlan> => {
       const existingImport = await repos.packageImports.getById(pkg.packageId)
-      const tripId =
-        existingImport?.tripId ?? pkg.trip.id ?? null
+      const tripId = existingImport?.tripId ?? pkg.trip.id ?? null
+
+      if (!existingImport) {
+        return {
+          isUpdate: false,
+          packageId: pkg.packageId,
+          revision: pkg.revision,
+          tripId,
+          created: pkg.travelOptions.length,
+          updated: 0,
+          unchanged: 0,
+          decisionsPreserved: 0,
+        }
+      }
 
       let created = 0
       let updated = 0
@@ -291,7 +307,7 @@ export function createPackageImportService(repos: Repositories) {
       }
 
       return {
-        isUpdate: Boolean(existingImport),
+        isUpdate: true,
         packageId: pkg.packageId,
         revision: pkg.revision,
         tripId,

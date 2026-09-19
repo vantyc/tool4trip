@@ -56,7 +56,9 @@ export function NewTravelPage() {
       if (!prepared.ok) {
         throw new Error(prepared.errors.join('; '))
       }
-      const preview = await previewAgentProposal(services, prepared.proposal)
+      const preview = await previewAgentProposal(services, prepared.proposal, {
+        assumeNewPackage: true,
+      })
       setProposal(prepared.proposal)
       setPlan(preview.plan)
       setJobStatus(null)

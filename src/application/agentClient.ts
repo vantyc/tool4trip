@@ -177,6 +177,13 @@ export async function newTravelAgent(
 export async function previewAgentProposal(
   services: Services,
   proposal: AgentProposal,
+  opts?: {
+    /**
+     * Nuevo viaje drafts are never persisted yet. Skip remote existence probes
+     * (avoids GET /api/package-imports/:id 404 on every generate).
+     */
+    assumeNewPackage?: boolean
+  },
 ): Promise<{ plan: ImportUpdatePlan }> {
   const validated = validateTripPackage(proposal.package)
   if (!validated.ok) {
@@ -185,6 +192,20 @@ export async function previewAgentProposal(
     )
   }
   const enriched = enrichTripPackageAirportArrivals(validated.package)
+  if (opts?.assumeNewPackage) {
+    return {
+      plan: {
+        isUpdate: false,
+        packageId: enriched.packageId,
+        revision: enriched.revision,
+        tripId: enriched.trip.id ?? null,
+        created: enriched.travelOptions.length,
+        updated: 0,
+        unchanged: 0,
+        decisionsPreserved: 0,
+      },
+    }
+  }
   const plan = await services.packages.planImport(enriched)
   return { plan }
 }
