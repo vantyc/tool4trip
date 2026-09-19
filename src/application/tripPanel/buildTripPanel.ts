@@ -348,11 +348,11 @@ export function computeTripPanelDiagnostics(input: {
     }
   }
 
-  // Estimated presented as confirmed
+  // Estimated presented as confirmed (not "confirmar" checklist language)
   for (const c of input.cards) {
     if (
       c.status === 'estimated' &&
-      /confirmad/i.test(`${c.title} ${c.notes ?? ''}`)
+      /\bconfirmad[oa]s?\b/i.test(`${c.title} ${c.notes ?? ''}`)
     ) {
       warnings.push(
         `Elemento estimado presentado como confirmado: «${c.title}».`,

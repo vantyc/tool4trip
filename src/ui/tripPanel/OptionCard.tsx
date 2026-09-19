@@ -79,7 +79,11 @@ export function FlightCard({ card }: { card: TripPanelCard }) {
       label: 'Salida',
       value: until ? `${when} → ${until}` : when,
     })
-  } else if (card.status === 'estimated' || card.status === 'pending') {
+  } else if (
+    card.status === 'estimated' ||
+    card.status === 'pending' ||
+    card.status === 'alternative'
+  ) {
     rows.push({ label: 'Horario', value: 'Pendiente de verificar' })
   }
   if (card.origin) rows.push({ label: 'Origen', value: card.origin })
