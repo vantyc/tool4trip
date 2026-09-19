@@ -789,7 +789,7 @@ export async function runAgentAsk(
           // After a coverage nudge, prefer fetchUrl before extra webSearch so
           // remaining budget is spent on promising candidates first.
           const orderedCalls = [...assistant.tool_calls]
-          if (forcedExtraRounds > 0) {
+          if (forcedExtraRounds > 0 || reserveForCoverage > 0) {
             orderedCalls.sort((a, b) => {
               const af = a.function.name === 'fetchUrl' ? 0 : 1
               const bf = b.function.name === 'fetchUrl' ? 0 : 1
@@ -797,7 +797,15 @@ export async function runAgentAsk(
             })
           }
           for (const call of orderedCalls) {
-            if (toolCallsUsed >= softCap) {
+            const isFetch = call.function.name === 'fetchUrl'
+            const atHardCap = toolCallsUsed >= deps.cfg.maxToolCalls
+            // Reserved slots are for fetchUrl (or post-nudge directed work).
+            // Non-fetch tools stop at softCap while reserve is active.
+            const blockedByReserve =
+              reserveForCoverage > 0 &&
+              toolCallsUsed >= softCap &&
+              !isFetch
+            if (atHardCap || blockedByReserve) {
               const checkedAt = nowIso()
               const reserved =
                 reserveForCoverage > 0 &&
@@ -821,7 +829,7 @@ export async function runAgentAsk(
                   UNTRUSTED_CONTENT: true,
                   error: skipTrace.error,
                   hint: reserved
-                    ? 'Next: fetchUrl on a promising candidate OR a refined day-specific/terminal/event query. Do not repeat prior queries.'
+                    ? 'Next: fetchUrl on a promising candidate URL OR a refined day-specific/terminal/event query. Do not repeat prior queries.'
                     : undefined,
                 }),
               })
