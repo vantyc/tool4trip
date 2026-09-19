@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "packageId": "fixture-return-alt",
+  "revision": 1,
+  "trip": {
+    "id": "trip-alt-1",
+    "title": "Regreso principal y alternativa",
+    "destination": "Guadalajara",
+    "startDate": "2026-09-19",
+    "endDate": "2026-09-22",
+    "timezone": "America/Mexico_City",
+    "goals": [],
+    "status": "planned"
+  },
+  "travelOptions": [
+    {
+      "externalId": "flt-out",
+      "type": "flight",
+      "status": "shortlisted",
+      "title": "MEX → GDL",
+      "origin": "MEX",
+      "destination": "GDL",
+      "startAt": "2026-09-19T10:00:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "agent"
+    },
+    {
+      "externalId": "flt-ret-main",
+      "type": "flight",
+      "status": "shortlisted",
+      "title": "Regreso preferido GDL → MEX 22",
+      "origin": "GDL",
+      "destination": "MEX",
+      "startAt": "2026-09-22T18:00:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "agent",
+      "notes": "Regreso preferido."
+    },
+    {
+      "externalId": "flt-ret-alt",
+      "type": "flight",
+      "status": "researched",
+      "title": "Regreso lunes 21",
+      "origin": "GDL",
+      "destination": "MEX",
+      "startAt": "2026-09-21T18:00:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "agent",
+      "notes": "Alternativa — no es el regreso preferido."
+    },
+    {
+      "externalId": "lodge-1",
+      "type": "lodging",
+      "status": "researched",
+      "title": "Hotel X",
+      "provider": "Hotel X",
+      "destination": "Guadalajara",
+      "startAt": "2026-09-19T15:00:00-06:00",
+      "verificationStatus": "unverified",
+      "sourceType": "agent"
+    }
+  ],
+  "itineraryItems": [],
+  "checklistItems": [],
+  "notes": []
+}

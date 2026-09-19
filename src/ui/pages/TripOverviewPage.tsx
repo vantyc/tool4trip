@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useOutletContext } from 'react-router-dom'
 import { services } from '../../application'
 import {
@@ -7,9 +6,13 @@ import {
   formatShortDate,
   formatTimeUntil,
 } from '../../application/summary'
+import { buildTripPanelFromPersisted } from '../../application/tripPanel'
 import type { ChecklistItem, DocumentMeta, Trip } from '../../domain/types'
 import { DEMO_TRIP_ID } from '../../seed/demoSanMiguel'
 import { useDocumentViewer } from '../documents/useDocumentViewer'
+import { TripPanel } from '../tripPanel'
+import { useCloudQuery } from '../useCloudQuery'
+import { useLiveQuery } from 'dexie-react-hooks'
 
 const DEMO_DEFAULT_NOW = '2026-09-20T10:00:00-06:00'
 
@@ -50,9 +53,36 @@ export function TripOverviewPage() {
 
   const now = new Date(nowIso)
 
-  const summary = useLiveQuery(
+  const {
+    data: summary,
+    loading: summaryLoading,
+    error: summaryError,
+    reload: reloadSummary,
+  } = useCloudQuery(
+    `summary:${trip.id}:${nowIso}`,
     () => services.summary.getTripSummary(trip.id, new Date(nowIso)),
-    [trip.id, nowIso],
+  )
+
+  const { data: panelBundle } = useCloudQuery(
+    `trip-panel:${trip.id}`,
+    async () => {
+      const [options, itinerary, checklist, notes, bookings] =
+        await Promise.all([
+          services.travelOptions.listByTrip(trip.id),
+          services.itinerary.listByTrip(trip.id),
+          services.checklist.listByTrip(trip.id),
+          services.notes.listByTrip(trip.id),
+          services.bookings.listByTrip(trip.id),
+        ])
+      return buildTripPanelFromPersisted({
+        trip,
+        options,
+        itinerary,
+        checklist,
+        notes,
+        bookings,
+      })
+    },
   )
 
   const nextDocs =
@@ -66,10 +96,14 @@ export function TripOverviewPage() {
       ...item,
       status: item.status === 'open' ? 'done' : 'open',
     })
+    reloadSummary()
   }
 
-  if (summary === undefined) {
+  if (summaryLoading || summary === undefined) {
     return <p className="muted">Cargando resumen…</p>
+  }
+  if (summaryError) {
+    return <p className="status-bad">{summaryError.message}</p>
   }
   if (summary === null) {
     return <p className="status-bad">No se pudo cargar el resumen.</p>
@@ -265,6 +299,13 @@ export function TripOverviewPage() {
           </ul>
         )}
       </section>
+
+      {panelBundle && (
+        <section className="tp-plan-block" aria-labelledby="tp-plan">
+          <h2 id="tp-plan">Plan del viaje</h2>
+          <TripPanel model={panelBundle} showEmptySections={false} embedded />
+        </section>
+      )}
 
       {Viewer}
     </section>

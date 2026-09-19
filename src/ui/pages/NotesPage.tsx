@@ -9,7 +9,21 @@ export function NotesPage() {
 
   useEffect(() => {
     if (!tripId) return
-    void services.notes.listByTrip(tripId).then(setNotes)
+    let cancelled = false
+    function load() {
+      void services.notes.listByTrip(tripId!).then((list) => {
+        if (!cancelled) setNotes(list)
+      })
+    }
+    load()
+    function onVis() {
+      if (document.visibilityState === 'visible') load()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [tripId])
 
   return (

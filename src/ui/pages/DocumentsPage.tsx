@@ -21,6 +21,7 @@ import type {
   ItineraryItem,
 } from '../../domain/types'
 import { useDocumentViewer } from '../documents/useDocumentViewer'
+import { useCloudQuery } from '../useCloudQuery'
 
 const DOC_TYPES: DocumentType[] = [
   'reservation',
@@ -53,17 +54,15 @@ export function DocumentsPage() {
       return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     }, [tripId]) ?? []
 
-  const bookings =
-    useLiveQuery(async () => {
-      if (!tripId) return [] as Booking[]
-      return services.bookings.listByTrip(tripId)
-    }, [tripId]) ?? []
+  const { data: bookings = [] } = useCloudQuery(
+    tripId ? `docs-bookings:${tripId}` : null,
+    () => services.bookings.listByTrip(tripId!),
+  )
 
-  const items =
-    useLiveQuery(async () => {
-      if (!tripId) return [] as ItineraryItem[]
-      return services.itinerary.listByTrip(tripId)
-    }, [tripId]) ?? []
+  const { data: items = [] } = useCloudQuery(
+    tripId ? `docs-items:${tripId}` : null,
+    () => services.itinerary.listByTrip(tripId!),
+  )
 
   const bookingTitle = new Map(bookings.map((b) => [b.id, b.title]))
   const itemTitle = new Map(

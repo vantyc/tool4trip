@@ -8,8 +8,9 @@ import { dexieReminderRepository } from './reminderRepository'
 import { dexieTravelOptionRepository } from './travelOptionRepository'
 import { dexieTripRepository } from './tripRepository'
 import type { Repositories } from './types'
+import { httpRepositories } from './httpRepositories'
 
-/** Local Dexie-backed repositories. Swap later for cloud implementations. */
+/** Local Dexie-backed repositories (documents + migration / validators). */
 export const localRepositories: Repositories = {
   trips: dexieTripRepository,
   bookings: dexieBookingRepository,
@@ -21,3 +22,5 @@ export const localRepositories: Repositories = {
   travelOptions: dexieTravelOptionRepository,
   packageImports: dexiePackageImportRepository,
 }
+
+export { httpRepositories }

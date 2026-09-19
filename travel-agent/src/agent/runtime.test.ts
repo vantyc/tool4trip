@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import type { AgentAskRequest } from '../../shared/agentContracts.ts'
-import { hydrateProposal, runAgentAsk } from '../agent/runtime.ts'
+import {
+  agentProposalSchema,
+  type AgentAskRequest,
+} from '../../shared/agentContracts.ts'
+import {
+  hydrateProposal,
+  runAgentAsk,
+  sanitizePackageCollections,
+} from '../agent/runtime.ts'
 import {
   AgentConfigError,
   AgentRuntimeError,
@@ -435,6 +442,84 @@ describe('AgentRuntime', () => {
       (hydrated.toolTrace as { tool: string }[]).map((t) => t.tool),
       ['webSearch'],
     )
+  })
+
+  it('7b: empty packageId from model falls back to agent-{tripId}', () => {
+    const draft = JSON.parse(validDraftJson('n'))
+    draft.package.packageId = ''
+    const req = sampleRequest('que vuelos hay')
+    // No packageImports in context → fallback agent-{tripId}
+    req.context.packageImports = []
+    const hydrated = hydrateProposal(draft, req, []) as {
+      package: { packageId: string }
+    }
+    assert.equal(hydrated.package.packageId, `agent-${req.tripId}`)
+    assert.ok(hydrated.package.packageId.length >= 1)
+  })
+
+  it('7c: sanitize fills missing itinerary/checklist externalId and drops empty checklist', () => {
+    const sanitized = sanitizePackageCollections({
+      itineraryItems: [
+        { title: 'Llegada AICM', place: 'AICM' },
+        { startAt: '2026-09-15T10:00:00-06:00' },
+        {},
+      ],
+      checklistItems: [
+        { label: 'Revisar vuelos' },
+        { title: 'Comprar boletos' },
+        { externalId: 'chk-empty' },
+        { externalId: 'bad/id', label: 'Pasaporte' },
+      ],
+      travelOptions: [
+        {
+          title: 'AM 200',
+          type: 'flight',
+          priceObserved: 1200,
+          // missing currency → price stripped
+        },
+      ],
+      notes: [{ body: 'nota' }, { title: 'sin body' }],
+    })
+    assert.equal(sanitized.itineraryItems.length, 2)
+    assert.ok(sanitized.itineraryItems[0]!.externalId)
+    assert.equal(sanitized.itineraryItems[0]!.title, 'Llegada AICM')
+    assert.ok(sanitized.itineraryItems[1]!.externalId)
+    assert.equal(sanitized.itineraryItems[1]!.title, 'Ítem de itinerario')
+    assert.equal(sanitized.checklistItems.length, 3)
+    assert.equal(sanitized.checklistItems[0]!.label, 'Revisar vuelos')
+    assert.equal(sanitized.checklistItems[1]!.label, 'Comprar boletos')
+    assert.equal(sanitized.checklistItems[2]!.label, 'Pasaporte')
+    assert.match(String(sanitized.checklistItems[2]!.externalId), /^[a-zA-Z0-9]/)
+    assert.equal(sanitized.travelOptions.length, 1)
+    assert.equal(sanitized.travelOptions[0]!.priceObserved, undefined)
+    assert.equal(sanitized.notes.length, 1)
+  })
+
+  it('7d: hydrateProposal recovers screenshot Zod failures (missing externalId/label)', () => {
+    const draft = JSON.parse(validDraftJson('vuelos AICM hoy'))
+    draft.package.itineraryItems = [{ title: 'Salida hacia GDL' }]
+    draft.package.checklistItems = [
+      {},
+      { title: 'Confirmar vuelo' },
+    ]
+    draft.package.travelOptions = [
+      {
+        type: 'flight',
+        title: 'AICM → GDL',
+        origin: 'MEX',
+        destination: 'GDL',
+      },
+    ]
+    const hydrated = hydrateProposal(draft, sampleRequest('que vuelos a guadalajara hay desde el aicm hoy'), [])
+    const parsed = agentProposalSchema.safeParse(hydrated)
+    assert.equal(parsed.success, true, () =>
+      parsed.success ? '' : JSON.stringify(parsed.error.issues),
+    )
+    if (!parsed.success) return
+    assert.ok(parsed.data.package.itineraryItems[0]!.externalId)
+    assert.equal(parsed.data.package.checklistItems.length, 1)
+    assert.equal(parsed.data.package.checklistItems[0]!.label, 'Confirmar vuelo')
+    assert.ok(parsed.data.package.travelOptions[0]!.externalId)
   })
 
   it('A: mock LLM → webSearch → structured final', async () => {

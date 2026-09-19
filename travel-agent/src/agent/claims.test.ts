@@ -5,8 +5,11 @@ import { agentProposalSchema } from '../../shared/agentContracts.ts'
 import {
   assertDraftGrounded,
   deriveEvidenceFromSource,
+  filterAggregateFlightClaims,
+  isDaySpecificFlightAsk,
   resolveClaimEvidence,
   scrubOperationalFreeText,
+  scrubUngroundedConcreteFields,
   validateClaimsAgainstToolTrace,
   type AgentClaimLlm,
 } from './claims.ts'
@@ -457,5 +460,273 @@ describe('claims as single source of truth', () => {
     assert.ok([1, 3].includes(proposal.package.travelOptions[0]?.priceObserved as number) ||
       proposal.package.travelOptions[0]?.priceObserved === 3 ||
       proposal.package.travelOptions[0]?.priceObserved === 1)
+  })
+})
+
+describe('context entity id vs externalId', () => {
+  const packageId = 'e7b872d0-2446-477a-8282-bc988d350bdc'
+  const fullId = `opt-${packageId}-flight-outbound-1`
+  const context = {
+    trip: { id: 'trip-1', title: 'Guanatos' },
+    bookings: [],
+    travelOptions: [
+      {
+        id: fullId,
+        tripId: 'trip-1',
+        type: 'flight',
+        status: 'researched',
+        title: 'CDMX → GDL',
+        externalId: 'flight-outbound-1',
+        packageId,
+      },
+    ],
+    itineraryItems: [],
+    checklistItems: [],
+    notes: [],
+    packageImports: [],
+  }
+
+  it('grounds when claim cites primary id (not short externalId)', () => {
+    const result = validateClaimsAgainstToolTrace(
+      [
+        {
+          kind: 'fact',
+          statement: 'CDMX → GDL',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: fullId,
+          field: 'title',
+          verificationStatus: 'unverified',
+          confidence: 'high',
+        },
+      ],
+      [],
+      context,
+    )
+    assert.equal(result.invalid.length, 0, JSON.stringify(result.invalid))
+    assert.equal(result.valid.length, 1)
+  })
+
+  it('still grounds when claim cites short externalId', () => {
+    const result = validateClaimsAgainstToolTrace(
+      [
+        {
+          kind: 'fact',
+          statement: 'CDMX → GDL',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'flight-outbound-1',
+          field: 'title',
+          verificationStatus: 'unverified',
+          confidence: 'high',
+        },
+      ],
+      [],
+      context,
+    )
+    assert.equal(result.invalid.length, 0, JSON.stringify(result.invalid))
+    assert.equal(result.valid.length, 1)
+  })
+})
+
+describe('day-specific flight ask vs weekly aggregate', () => {
+  it('detects day-specific flight prompts', () => {
+    assert.equal(
+      isDaySpecificFlightAsk(
+        'que vuelos hay desde cdmx a guadalajara este 15 de septiembre de 2026',
+      ),
+      true,
+    )
+    assert.equal(isDaySpecificFlightAsk('opciones de hospedaje en GDL'), false)
+  })
+
+  it('drops weekly aggregate claims for day-specific asks', () => {
+    const prompt =
+      'que vuelos hay desde cdmx a guadalajara este 15 de septiembre de 2026'
+    const filtered = filterAggregateFlightClaims(
+      [
+        {
+          kind: 'other_factual',
+          statement:
+            'Hay 591 vuelos por semana de Ciudad de México a Guadalajara en septiembre de 2026',
+          sourceType: 'web',
+          sourceUrl: 'https://example.com/cdmx-gdl',
+          evidenceIndex: 0,
+          sourceTitle: 'CDMX-GDL',
+          quotedFact:
+            'Hay 591 vuelos por semana de Ciudad de México a Guadalajara en septiembre.',
+          verificationStatus: 'verified',
+          confidence: 'high',
+        },
+      ],
+      prompt,
+    )
+    assert.equal(filtered.kept.length, 0)
+    assert.ok(filtered.warnings.some((w) => /omitido agregado/i.test(w)))
+    assert.ok(filtered.warnings.some((w) => /fecha pedida/i.test(w)))
+
+    const draft = baseDraft({
+      claims: [
+        {
+          kind: 'other_factual',
+          statement:
+            'Hay 591 vuelos por semana de Ciudad de México a Guadalajara',
+          sourceType: 'web',
+          sourceUrl: 'https://example.com/cdmx-gdl',
+          evidenceIndex: 0,
+          verificationStatus: 'verified',
+          confidence: 'high',
+        },
+      ],
+      package: {
+        schemaVersion: 1,
+        packageId: 'pkg-1',
+        revision: 1,
+        trip: {
+          id: 'trip-1',
+          title: 'SMA',
+          startDate: '2026-09-15',
+          endDate: '2026-09-16',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        travelOptions: [],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+      },
+    })
+    const trace: ToolTraceEntry[] = [
+      {
+        tool: 'webSearch',
+        ok: true,
+        sources: [
+          {
+            url: 'https://example.com/cdmx-gdl',
+            title: 'CDMX-GDL',
+            snippet:
+              'Hay 591 vuelos por semana de Ciudad de México a Guadalajara.',
+          },
+        ],
+        checkedAt: '2026-09-07T00:00:00+00:00',
+      },
+    ]
+    const g = assertDraftGrounded(draft, trace, undefined, {
+      userPrompt: prompt,
+    })
+    assert.equal(g.ok, true, g.ok ? '' : g.message)
+    if (!g.ok) throw new Error('expected ok')
+    assert.equal(g.validClaims.length, 0)
+    const warnings = (g.draft.warnings as string[]).join('\n')
+    assert.match(warnings, /omitido agregado/)
+    assert.match(warnings, /fecha pedida/)
+    assert.doesNotMatch(warnings, /server: evidencia \(other_factual\): Hay 591/)
+  })
+
+  it('skeleton: strips estimated price/schedule without provenance; keeps verified', () => {
+    const draft = {
+      narrative: 'esqueleto',
+      warnings: [],
+      diffSummary: [],
+      ops: [],
+      claims: [],
+      package: {
+        schemaVersion: 1,
+        packageId: 'pkg-skel',
+        revision: 1,
+        trip: {
+          id: 't1',
+          title: 'SMA',
+          startDate: '2026-09-19',
+          endDate: '2026-09-22',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        travelOptions: [
+          {
+            externalId: 'flt-est',
+            type: 'flight',
+            status: 'researched',
+            title: 'MEX→GDL estimado',
+            origin: 'MEX',
+            destination: 'GDL',
+            startAt: '2026-09-19T10:00:00-06:00',
+            priceObserved: 1999,
+            currency: 'MXN',
+            verificationStatus: 'estimated',
+            sourceType: 'agent',
+          },
+          {
+            externalId: 'flt-ver',
+            type: 'flight',
+            status: 'shortlisted',
+            title: 'MEX→GDL verificado',
+            origin: 'MEX',
+            destination: 'GDL',
+            startAt: '2026-09-19T11:00:00-06:00',
+            priceObserved: 1800,
+            currency: 'MXN',
+            verificationStatus: 'verified',
+            sourceType: 'agent',
+            sourceUrl: 'https://example.com/flight',
+          },
+        ],
+        itineraryItems: [
+          {
+            externalId: 'goal-serenata',
+            title: 'Serenata',
+            startAt: '2026-09-20T20:00:00-06:00',
+            notes: 'pendiente',
+          },
+        ],
+        checklistItems: [],
+        notes: [],
+      },
+    }
+    const g = assertDraftGrounded(draft, [], undefined, {
+      allowSkeletonPackage: true,
+    })
+    assert.equal(g.ok, true)
+    if (!g.ok) throw new Error('expected ok')
+    const opts = (
+      g.draft.package as {
+        travelOptions: Array<Record<string, unknown>>
+        itineraryItems: Array<Record<string, unknown>>
+      }
+    ).travelOptions
+    const est = opts.find((o) => o.externalId === 'flt-est')!
+    const ver = opts.find((o) => o.externalId === 'flt-ver')!
+    assert.equal(est.startAt, undefined)
+    assert.equal(est.priceObserved, undefined)
+    assert.equal(est.currency, undefined)
+    assert.equal(ver.startAt, '2026-09-19T11:00:00-06:00')
+    assert.equal(ver.priceObserved, 1800)
+    const itin = (
+      g.draft.package as { itineraryItems: Array<Record<string, unknown>> }
+    ).itineraryItems[0]!
+    assert.equal(itin.startAt, undefined)
+    assert.match(String(itin.notes), /2026-09-20/)
+  })
+
+  it('scrubUngroundedConcreteFields is idempotent on already-clean package', () => {
+    const draft = {
+      package: {
+        travelOptions: [
+          {
+            externalId: 'x',
+            type: 'flight',
+            title: 'X',
+            verificationStatus: 'estimated',
+          },
+        ],
+        itineraryItems: [],
+      },
+    }
+    const w1 = scrubUngroundedConcreteFields(draft, { scrubItineraryClocks: true })
+    const w2 = scrubUngroundedConcreteFields(draft, { scrubItineraryClocks: true })
+    assert.equal(w1.length, 0)
+    assert.equal(w2.length, 0)
   })
 })

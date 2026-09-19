@@ -8,9 +8,10 @@ import {
 } from '../../shared/agentContracts'
 import type { Services } from './services'
 import type { ImportUpdatePlan } from './packageImport'
+import { enrichTripPackageAirportArrivals } from './airportArrivalEnrich'
 import { validateTripPackage } from './tripPackage'
 import { buildTripContextSnapshot } from './tripContextSnapshot'
-import { localRepositories } from '../data/repositories'
+import { httpRepositories } from '../data/repositories/httpRepositories'
 
 export type { AgentProposal }
 
@@ -26,29 +27,13 @@ export type AskTravelProgress = {
   status: 'queued' | 'running' | 'succeeded' | 'failed'
 }
 
-/**
- * Async Ask Travel: POST → 202 jobId → poll GET /api/agent/jobs/:id.
- * Never auto-applies; caller shows proposal then Apply/Discard.
- */
-export async function askTravelAgent(
-  _services: Services,
-  input: { tripId: string; prompt: string },
+async function postAgentAsk(
+  body: AgentAskRequest,
   opts?: {
     onProgress?: (p: AskTravelProgress) => void
     signal?: AbortSignal
   },
 ): Promise<AgentProposal> {
-  const context = await buildTripContextSnapshot(
-    localRepositories,
-    input.tripId,
-  )
-  const body: AgentAskRequest = agentAskRequestSchema.parse({
-    prompt: input.prompt,
-    tripId: input.tripId,
-    context,
-    locale: 'es',
-  })
-
   const res = await fetch('/api/agent/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -65,7 +50,6 @@ export async function askTravelAgent(
     throw new Error(text || `Error del agente (${res.status})`)
   }
 
-  // Legacy sync rollback path (200 + proposal body).
   if (res.status === 200) {
     return agentProposalSchema.parse(await res.json())
   }
@@ -81,12 +65,15 @@ export async function askTravelAgent(
     }
     if (waited) await sleep(POLL_MS)
     waited = true
-    const stRes = await fetch(`/api/agent/jobs/${encodeURIComponent(created.jobId)}`, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      credentials: 'same-origin',
-      signal: opts?.signal,
-    })
+    const stRes = await fetch(
+      `/api/agent/jobs/${encodeURIComponent(created.jobId)}`,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        signal: opts?.signal,
+      },
+    )
     if (stRes.status === 401) {
       throw new Error('Sesión requerida — vuelve a iniciar sesión.')
     }
@@ -107,18 +94,96 @@ export async function askTravelAgent(
       return agentProposalSchema.parse(status.proposal)
     }
     if (status.status === 'failed') {
-      throw new Error(
-        status.error?.message || 'El agente falló sin detalle',
-      )
+      throw new Error(status.error?.message || 'El agente falló sin detalle')
     }
   }
 
   throw new Error('Tiempo de espera agotado mientras investigaba')
 }
 
+/**
+ * Async Ask Travel: POST → 202 jobId → poll GET /api/agent/jobs/:id.
+ * Never auto-applies; caller shows proposal then Apply/Discard.
+ */
+export async function askTravelAgent(
+  _services: Services,
+  input: { tripId: string; prompt: string },
+  opts?: {
+    onProgress?: (p: AskTravelProgress) => void
+    signal?: AbortSignal
+  },
+): Promise<AgentProposal> {
+  const context = await buildTripContextSnapshot(
+    httpRepositories,
+    input.tripId,
+  )
+  const body: AgentAskRequest = agentAskRequestSchema.parse({
+    prompt: input.prompt,
+    tripId: input.tripId,
+    context,
+    locale: 'es',
+    mode: 'ask',
+  })
+  return postAgentAsk(body, opts)
+}
+
+/** Empty snapshot shell for creating a brand-new trip (cloud SoT). */
+function emptyNewTravelContext(tripId: string) {
+  return {
+    trip: {
+      id: tripId,
+      title: 'Nuevo viaje',
+      startDate: '2026-01-01',
+      endDate: '2026-01-02',
+      timezone: 'America/Mexico_City',
+      goals: [],
+      status: 'planned',
+    },
+    bookings: [],
+    travelOptions: [],
+    itineraryItems: [],
+    checklistItems: [],
+    notes: [],
+    packageImports: [],
+  }
+}
+
+/**
+ * Nuevo viaje: natural-language prompt → TripPackage skeleton (async job).
+ */
+export async function newTravelAgent(
+  _services: Services,
+  input: { prompt: string; tripId?: string },
+  opts?: {
+    onProgress?: (p: AskTravelProgress) => void
+    signal?: AbortSignal
+  },
+): Promise<AgentProposal> {
+  const tripId =
+    input.tripId ??
+    (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `new-${Date.now()}`)
+  const body: AgentAskRequest = agentAskRequestSchema.parse({
+    prompt: input.prompt,
+    tripId,
+    context: emptyNewTravelContext(tripId),
+    locale: 'es',
+    mode: 'new_travel',
+  })
+  return postAgentAsk(body, opts)
+}
+
 export async function previewAgentProposal(
   services: Services,
   proposal: AgentProposal,
+  opts?: {
+    /**
+     * Nuevo viaje drafts are never persisted yet. Skip remote existence probes
+     * (avoids GET /api/package-imports/:id 404 on every generate).
+     */
+    assumeNewPackage?: boolean
+  },
 ): Promise<{ plan: ImportUpdatePlan }> {
   const validated = validateTripPackage(proposal.package)
   if (!validated.ok) {
@@ -126,7 +191,22 @@ export async function previewAgentProposal(
       validated.errors.map((e) => `${e.path}: ${e.message}`).join('; '),
     )
   }
-  const plan = await services.packages.planImport(validated.package)
+  const enriched = enrichTripPackageAirportArrivals(validated.package)
+  if (opts?.assumeNewPackage) {
+    return {
+      plan: {
+        isUpdate: false,
+        packageId: enriched.packageId,
+        revision: enriched.revision,
+        tripId: enriched.trip.id ?? null,
+        created: enriched.travelOptions.length,
+        updated: 0,
+        unchanged: 0,
+        decisionsPreserved: 0,
+      },
+    }
+  }
+  const plan = await services.packages.planImport(enriched)
   return { plan }
 }
 

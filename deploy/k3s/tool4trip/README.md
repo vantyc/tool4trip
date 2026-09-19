@@ -46,3 +46,13 @@ Swap de proveedor (solo env, sin tocar PWA): cambiar `LLM_BASE_URL` / `LLM_MODEL
 - `https://tool4trip.com/login` → form
 - `https://tool4trip.com/api/agent/ask` → 202 job (ForwardAuth)
 - `https://tool4trip.com/api/agent/jobs/:id` → status / proposal
+
+## Cloud trips (Postgres + trip-api)
+
+Create DB secret before applying postgres / trip-api:
+
+```bash
+POSTGRES_PASSWORD='...' ./scripts/create-trip-api-db-secret.sh
+```
+
+Images: `ghcr.io/vantyc/trip-api:latest`. Ingress `/api/trips*` (+ nested entity paths) uses the same ForwardAuth middleware as the agent.

@@ -18,13 +18,27 @@ export function ItineraryPage() {
 
   useEffect(() => {
     if (!tripId) return
-    void Promise.all([
-      services.itinerary.listResolvedByTrip(tripId),
-      services.reminders.listResolvedByTrip(tripId),
-    ]).then(([items, rems]) => {
-      setResolved(items)
-      setReminders(rems)
-    })
+    let cancelled = false
+    function load() {
+      void Promise.all([
+        services.itinerary.listResolvedByTrip(tripId!),
+        services.reminders.listResolvedByTrip(tripId!),
+      ]).then(([items, rems]) => {
+        if (!cancelled) {
+          setResolved(items)
+          setReminders(rems)
+        }
+      })
+    }
+    load()
+    function onVis() {
+      if (document.visibilityState === 'visible') load()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [tripId])
 
   const groups = groupByDate(resolved)

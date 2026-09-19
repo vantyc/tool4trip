@@ -1,4 +1,3 @@
-import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { services } from '../../application'
@@ -10,6 +9,7 @@ import {
   formatTravelOptionType,
   formatVerificationStatus,
 } from '../format'
+import { useCloudQuery } from '../useCloudQuery'
 
 const GROUPS: { key: string; types: TravelOptionType[]; title: string }[] = [
   { key: 'flights', types: ['flight'], title: 'Vuelos' },
@@ -32,11 +32,10 @@ export function OptionsPage() {
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
-  const options =
-    useLiveQuery(async () => {
-      if (!tripId) return []
-      return services.travelOptions.listByTrip(tripId)
-    }, [tripId]) ?? []
+  const { data: options = [], loading, error: loadError, reload } =
+    useCloudQuery(tripId ? `options:${tripId}` : null, async () => {
+      return services.travelOptions.listByTrip(tripId!)
+    })
 
   async function setStatus(
     id: string,
@@ -46,6 +45,7 @@ export function OptionsPage() {
     setError(null)
     try {
       await services.travelOptions.setStatus(id, status)
+      reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error')
     } finally {
@@ -62,6 +62,7 @@ export function OptionsPage() {
     setError(null)
     try {
       await services.travelOptions.convertToBooking(id)
+      reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al convertir')
     } finally {
@@ -76,6 +77,7 @@ export function OptionsPage() {
     setError(null)
     try {
       await services.travelOptions.updateNotes(opt.id, next)
+      reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error')
     } finally {
@@ -89,9 +91,13 @@ export function OptionsPage() {
       <p className="muted">
         Investigación — no son reservas confirmadas hasta convertirlas.
       </p>
-      {error && <p className="status-bad">{error}</p>}
+      {(error || loadError) && (
+        <p className="status-bad">{error ?? loadError?.message}</p>
+      )}
 
-      {options.length === 0 ? (
+      {loading ? (
+        <p className="muted">Cargando…</p>
+      ) : options.length === 0 ? (
         <p className="muted">
           Sin opciones. Importa un TripPackage desde la lista de viajes.
         </p>

@@ -114,9 +114,9 @@ const packageItineraryItemSchema = z
 const packageChecklistItemSchema = z
   .object({
     externalId,
-    title: z.string().min(1),
-    status: z.enum(['open', 'done']).default('open'),
-    notes: z.string().optional(),
+    label: z.string().min(1),
+    dueAt: isoWithOffset.optional(),
+    sortOrder: z.number().int().nonnegative().optional(),
   })
   .strict()
 
@@ -238,12 +238,18 @@ export const tripContextSnapshotSchema = z
 
 export type TripContextSnapshot = z.infer<typeof tripContextSnapshotSchema>
 
+export const agentAskModeSchema = z.enum(['ask', 'new_travel'])
+
+export type AgentAskMode = z.infer<typeof agentAskModeSchema>
+
 export const agentAskRequestSchema = z
   .object({
     prompt: z.string().min(1).max(8000),
     tripId: z.string().min(1),
     context: tripContextSnapshotSchema,
     locale: z.string().optional(),
+    /** ask = mutate/query existing trip; new_travel = create trip from prompt */
+    mode: agentAskModeSchema.default('ask'),
   })
   .strict()
 
