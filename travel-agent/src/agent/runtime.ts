@@ -34,6 +34,7 @@ import {
   extractTripDatesFromPrompt,
   scrubUnsupportedFreeTextAssertions,
   shouldForceAnotherResearchRound,
+  shouldSkipToolCallForFlightPriority,
   assessResearchGoals,
   type ResearchDiagnostics,
   type ResearchGoal,
@@ -798,6 +799,43 @@ export async function runAgentAsk(
           }
           for (const call of orderedCalls) {
             const isFetch = call.function.name === 'fetchUrl'
+            // Defer lodging/event tools while critical flight attempt unfinished
+            if (
+              intent === 'new_travel' &&
+              researchGoalsSeed.length > 0 &&
+              shouldSkipToolCallForFlightPriority({
+                toolName: call.function.name,
+                argsJson: call.function.arguments,
+                goals: assessResearchGoals(researchGoalsSeed, toolTrace, {
+                  tripDates,
+                }),
+                toolTrace,
+                tripDates,
+              })
+            ) {
+              const checkedAt = nowIso()
+              const skipTrace: ToolTraceEntry = {
+                tool: call.function.name,
+                args: { skipped: true, deferred: 'flight_critical' },
+                ok: false,
+                sources: [],
+                error:
+                  'deferred: critical flight_day_specific still needs directed research before lodging/events',
+                checkedAt,
+              }
+              toolTrace.push(skipTrace)
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                name: call.function.name,
+                content: JSON.stringify({
+                  UNTRUSTED_CONTENT: true,
+                  error: skipTrace.error,
+                  hint: 'Run directed MEX→GDL day-specific / carrier webSearch or fetchUrl on a flight candidate first.',
+                }),
+              })
+              continue
+            }
             const atHardCap = toolCallsUsed >= deps.cfg.maxToolCalls
             // Reserved slots are for fetchUrl (or post-nudge directed work).
             // Non-fetch tools stop at softCap while reserve is active.
@@ -829,7 +867,7 @@ export async function runAgentAsk(
                   UNTRUSTED_CONTENT: true,
                   error: skipTrace.error,
                   hint: reserved
-                    ? 'Next: fetchUrl on a promising candidate URL OR a refined day-specific/terminal/event query. Do not repeat prior queries.'
+                    ? 'Next: fetchUrl on a promising flight candidate URL OR a refined day-specific/carrier query. Do not spend reserved slots on lodging yet.'
                     : undefined,
                 }),
               })
@@ -871,6 +909,8 @@ export async function runAgentAsk(
               maxSteps: deps.cfg.maxSteps,
               forcedExtraRounds,
               hasSuccessfulFetch,
+              toolTrace,
+              tripDates,
             })
           ) {
             forcedExtraRounds += 1
@@ -895,6 +935,7 @@ export async function runAgentAsk(
                 goals: assessed,
                 toolTrace,
                 tripDates,
+                prompt: req.prompt,
               }),
             })
             continue

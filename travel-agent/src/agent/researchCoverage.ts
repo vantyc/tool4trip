@@ -17,11 +17,15 @@ export type ResearchGoalKind =
 
 export type GoalStatus = 'RESOLVED' | 'PARTIAL' | 'UNRESOLVED'
 
+/** Investigation priority: critical blocks secondary until a reasonable attempt finishes. */
+export type GoalTier = 'critical' | 'supporting' | 'secondary'
+
 export type ResearchGoal = {
   id: string
   kind: ResearchGoalKind
   label: string
   important: boolean
+  tier: GoalTier
   status: GoalStatus
   evidenceNote?: string
 }
@@ -31,6 +35,9 @@ export type CandidateRejectReason =
   | 'wrong_route'
   | 'generic_landing_page'
   | 'insufficient_evidence'
+  | 'insufficient_day_specific_evidence'
+  | 'aggregated_schedule'
+  | 'fetch_blocked_js'
   | 'stale'
   | 'duplicate'
   | 'fetch_failed'
@@ -139,6 +146,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
         ? `Vuelo day-specific (${dates.join(', ')})`
         : 'Vuelo day-specific (fecha del prompt)',
       important: true,
+      tier: 'critical',
       status: 'UNRESOLVED',
     })
   }
@@ -148,6 +156,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
       kind: 'airport_terminal',
       label: 'Terminal AICM / aeropuerto del vuelo',
       important: true,
+      tier: 'supporting',
       status: 'UNRESOLVED',
     })
   }
@@ -157,6 +166,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
       kind: 'bus_terminal',
       label: 'Terminal correcta GDL → destino terrestre',
       important: true,
+      tier: 'supporting',
       status: 'UNRESOLVED',
     })
   }
@@ -166,6 +176,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
       kind: 'connection_feasibility',
       label: 'Viabilidad de conexión con corrida terrestre',
       important: true,
+      tier: 'supporting',
       status: 'UNRESOLVED',
     })
   }
@@ -175,6 +186,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
       kind: 'lodging_contingency',
       label: 'Hotel contingencia cerca de terminal',
       important: true,
+      tier: 'secondary',
       status: 'UNRESOLVED',
     })
   }
@@ -186,6 +198,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
         ? `Hospedaje en ${destTown}`
         : 'Hospedaje en destino',
       important: true,
+      tier: 'secondary',
       status: 'UNRESOLVED',
     })
   }
@@ -197,6 +210,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
         ? `Serenata/actividades (${dates.join(', ')})`
         : 'Serenata/actividades del destino',
       important: true,
+      tier: 'secondary',
       status: 'UNRESOLVED',
     })
   }
@@ -206,6 +220,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
       kind: 'ground_leg',
       label: 'Tramo terrestre / operador / horarios',
       important: true,
+      tier: 'supporting',
       status: 'UNRESOLVED',
     })
   }
@@ -220,6 +235,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
       kind: 'other',
       label: 'Investigación solicitada en el prompt',
       important: true,
+      tier: 'supporting',
       status: 'UNRESOLVED',
     })
   }
@@ -312,6 +328,102 @@ function isGenericLanding(url: string, title: string, snippet: string): boolean 
   return false
 }
 
+export function isFetchBlockedJs(snippet: string, title = ''): boolean {
+  const blob = norm(`${title} ${snippet}`)
+  return (
+    /javascript is disabled/.test(blob) ||
+    /verify that you.?re not a robot/.test(blob) ||
+    /enable javascript and then reload/.test(blob) ||
+    /captcha|cf-browser-verification|attention required/.test(blob) ||
+    (/em_server_data/.test(blob) && /fare-daily-histogram/.test(blob)) ||
+    (/window\[.em_server_data/.test(blob) && !/\b\d{1,2}:\d{2}\b/.test(snippet))
+  )
+}
+
+export function isAggregatedScheduleSnippet(snippet: string, title = ''): boolean {
+  const blob = norm(`${title} ${snippet}`)
+  return (
+    /\b\d+\s+vuelos?\s+por\s+semana\b/.test(blob) ||
+    /\b\d+\s+vuelos?\s+al\s+d[ií]a\b/.test(blob) ||
+    /horas de salida var[ií]an/.test(blob) ||
+    /weekly\s+flights|flights?\s+per\s+week/.test(blob)
+  )
+}
+
+export function isFlightResearchQuery(query: string): boolean {
+  const q = norm(query)
+  return (
+    /\bvuelo|\bflight|\baeromexico|\bvolaris|\bviva\b/.test(q) ||
+    (/\bmex\b/.test(q) && /\bgdl\b/.test(q)) ||
+    /flight schedule|horario.*vuelo/.test(q)
+  )
+}
+
+export function isSecondaryResearchQuery(query: string): boolean {
+  const q = norm(query)
+  if (isFlightResearchQuery(q)) return false
+  return (
+    /\bhotel|\bhoteles|\bhospedaje|\balojamiento|\bairbnb\b/.test(q) ||
+    /\bserenata|\bferia|\bfiestas|\bactividades|\bevento|\bcartelera\b/.test(q)
+  )
+}
+
+export function isDirectedFlightRetryQuery(query: string): boolean {
+  const q = norm(query)
+  if (!isFlightResearchQuery(q)) return false
+  // Carrier- or schedule-specific — not merely "19 septiembre" in a generic ask.
+  return (
+    /\baeromexico|\bvolaris|\bviva\b|\bamerican airlines\b/.test(q) ||
+    /flight schedule|horario(s)? (de )?vuelo/.test(q)
+  )
+}
+
+/** True when blob has trip date + route + clock + carrier-ish token. */
+export function hasDaySpecificFlightEvidenceInText(
+  text: string,
+  tripDates: string[],
+): boolean {
+  const blob = norm(text)
+  if (!tripDates.length) return false
+  const hasDate =
+    tripDates.some((d) => {
+      const [y, m, day] = d.split('-')
+      if (!y || !m || !day) return false
+      return (
+        blob.includes(d) ||
+        blob.includes(`${day}/${m}/${y}`) ||
+        blob.includes(`${m}/${day}/${y}`) ||
+        // Spanish: 19 septiembre 2026 / 19 sep 2026
+        new RegExp(
+          `\\b${Number(day)}\\s*(de\\s+)?(sep|sept|septiembre)\\.?\\s*(de\\s+)?${y}\\b`,
+        ).test(blob)
+      )
+    }) || false
+  if (!hasDate) return false
+  const hasRoute =
+    (/\bmex\b/.test(blob) && /\bgdl\b/.test(blob)) ||
+    (/ciudad de mexico|cdmx|mexico city/.test(blob) &&
+      /guadalajara/.test(blob))
+  if (!hasRoute) return false
+  if (!/\b\d{1,2}:\d{2}\b/.test(text)) return false
+  if (
+    !/\baeromexico|\bvolaris|\bviva|\bamerican|\bairline|\baerolinea|\boperad|\bvuelo\s+[a-z]?\d/i.test(
+      blob,
+    )
+  ) {
+    return false
+  }
+  return true
+}
+
+function flightOptionHasConcreteArrival(opt: Record<string, unknown>): boolean {
+  if (String(opt.type ?? '') !== 'flight') return false
+  const start = String(opt.startAt ?? '')
+  const end = String(opt.endAt ?? '')
+  // Need real clock, not bare date
+  return /T\d{2}:\d{2}/.test(start) || /T\d{2}:\d{2}/.test(end)
+}
+
 function snippetHasWrongDate(
   snippet: string,
   title: string,
@@ -383,13 +495,26 @@ export function classifyCandidates(
   const decisions: CandidateDecision[] = []
   for (const src of listTraceSources(toolTrace)) {
     if (seen.has(src.url)) {
-      decisions.push({
-        url: src.url,
-        query: src.query,
-        goalIds: [],
-        decision: 'rejected',
-        reason: 'duplicate',
-      })
+      if (src.tool === 'fetchUrl' && isFetchBlockedJs(src.snippet, src.title)) {
+        decisions.push({
+          url: src.url,
+          query: src.query,
+          goalIds: goals
+            .filter((g) => goalMatchesSource(g, src))
+            .map((g) => g.id),
+          decision: 'rejected',
+          reason: 'fetch_blocked_js',
+          note: 'JS shell / captcha / anti-bot on fetchUrl',
+        })
+      } else {
+        decisions.push({
+          url: src.url,
+          query: src.query,
+          goalIds: [],
+          decision: 'rejected',
+          reason: 'duplicate',
+        })
+      }
       continue
     }
     seen.add(src.url)
@@ -409,6 +534,18 @@ export function classifyCandidates(
     const matched = goals.filter((g) => goalMatchesSource(g, src))
     const goalIds = matched.map((g) => g.id)
 
+    if (src.tool === 'fetchUrl' && src.ok && isFetchBlockedJs(src.snippet, src.title)) {
+      decisions.push({
+        url: src.url,
+        query: src.query,
+        goalIds,
+        decision: 'rejected',
+        reason: 'fetch_blocked_js',
+        note: 'JS shell / captcha / anti-bot — no day-specific schedule extracted',
+      })
+      continue
+    }
+
     if (snippetHasWrongDate(src.snippet, src.title, tripDates)) {
       decisions.push({
         url: src.url,
@@ -416,6 +553,18 @@ export function classifyCandidates(
         goalIds,
         decision: 'rejected',
         reason: 'wrong_date',
+      })
+      continue
+    }
+
+    if (isAggregatedScheduleSnippet(src.snippet, src.title)) {
+      decisions.push({
+        url: src.url,
+        query: src.query,
+        goalIds,
+        decision: 'rejected',
+        reason: 'aggregated_schedule',
+        note: 'weekly/daily aggregate — not a day-specific inventory',
       })
       continue
     }
@@ -431,12 +580,50 @@ export function classifyCandidates(
       continue
     }
 
+    // Flight-ish hit without day-specific evidence for trip dates
+    const flightish = matched.some((g) => g.kind === 'flight_day_specific')
+    if (
+      flightish &&
+      tripDates.length > 0 &&
+      !hasDaySpecificFlightEvidenceInText(
+        `${src.title}\n${src.snippet}`,
+        tripDates,
+      )
+    ) {
+      decisions.push({
+        url: src.url,
+        query: src.query,
+        goalIds,
+        decision: 'rejected',
+        reason: 'insufficient_day_specific_evidence',
+      })
+      continue
+    }
+
     // Named lodging / event pages without schedule/price → partial candidate
     const namedHotel =
       /hotel|posada|hospedaje/.test(norm(src.title + src.snippet)) &&
       /san miguel|guadalajara|central/.test(norm(src.title + src.url))
     const namedEvent =
       /feria|serenata|fiesta 2026|cartelera/.test(norm(src.title + src.snippet))
+
+    if (
+      flightish &&
+      hasDaySpecificFlightEvidenceInText(
+        `${src.title}\n${src.snippet}`,
+        tripDates,
+      )
+    ) {
+      decisions.push({
+        url: src.url,
+        query: src.query,
+        goalIds,
+        decision: 'accepted',
+        reason: 'accepted_partial',
+        note: 'day-specific flight candidate — fetchUrl/refine before verified',
+      })
+      continue
+    }
 
     if (src.tool === 'fetchUrl' && src.ok) {
       decisions.push({
@@ -502,27 +689,51 @@ function hasFetchForGoals(
   )
 }
 
-function optionAnchorsGoal(
+export function optionAnchorsGoal(
   goal: ResearchGoal,
   opt: Record<string, unknown>,
+  opts?: { allOptions?: Record<string, unknown>[] },
 ): 'RESOLVED' | 'PARTIAL' | null {
   const url = typeof opt.sourceUrl === 'string' ? opt.sourceUrl : ''
   const v = String(opt.verificationStatus ?? '')
   const type = String(opt.type ?? '')
   const title = norm(String(opt.title ?? ''))
   const notes = norm(String(opt.notes ?? ''))
-  const blob = `${title} ${notes} ${type}`
+  const place = norm(String(opt.place ?? opt.address ?? ''))
+  const blob = `${title} ${notes} ${place} ${type} ${norm(url)}`
 
   const kindOk = (() => {
     switch (goal.kind) {
       case 'flight_day_specific':
         return type === 'flight'
-      case 'airport_terminal':
-        return type === 'flight' || /terminal|aicm/.test(blob)
+      case 'airport_terminal': {
+        // Must be airport-related — bus central SMA must NOT match via "terminal".
+        if (type === 'flight') {
+          return /aicm|aeropuerto|airport|terminal\s*[12]|terminal nacional/.test(
+            blob,
+          )
+        }
+        if (type === 'transfer') {
+          return /aeropuerto|airport|aicm/.test(blob)
+        }
+        return false
+      }
       case 'bus_terminal':
+        return (
+          ['bus', 'train', 'transfer'].includes(type) &&
+          /terminal|central|autobus|autobús|bus station/.test(blob)
+        )
       case 'ground_leg':
-      case 'connection_feasibility':
-        return ['bus', 'train', 'transfer'].includes(type) || /terminal|autobus/.test(blob)
+        return ['bus', 'train', 'transfer'].includes(type)
+      case 'connection_feasibility': {
+        // Cannot resolve without a flight that has a concrete arrival clock.
+        const flights = (opts?.allOptions ?? []).filter(
+          (o) => String(o.type ?? '') === 'flight',
+        )
+        const hasArrival = flights.some((f) => flightOptionHasConcreteArrival(f))
+        if (!hasArrival) return false
+        return ['bus', 'train', 'transfer'].includes(type)
+      }
       case 'lodging_contingency':
         return type === 'lodging' && /guadalajara|terminal|contingencia/.test(blob)
       case 'lodging_destination':
@@ -571,9 +782,42 @@ export function assessResearchGoals(
     let status: GoalStatus = 'UNRESOLVED'
     let evidenceNote: string | undefined
 
+    // connection_feasibility: hard gate — no flight arrival ⇒ cannot RESOLVE
+    if (g.kind === 'connection_feasibility') {
+      const hasArrival = options.some((o) => flightOptionHasConcreteArrival(o))
+      if (!hasArrival) {
+        const busHit = options.some(
+          (o) =>
+            ['bus', 'train', 'transfer'].includes(String(o.type ?? '')) &&
+            typeof o.sourceUrl === 'string' &&
+            /^https?:\/\//i.test(String(o.sourceUrl)),
+        )
+        return {
+          ...g,
+          status: busHit ? 'PARTIAL' : 'UNRESOLVED',
+          evidenceNote: busHit
+            ? 'bus evidence present but flight arrival unknown — cannot evaluate connection'
+            : 'flight arrival unknown — connection feasibility unresolved',
+        }
+      }
+    }
+
     for (const o of options) {
-      const hit = optionAnchorsGoal(g, o)
+      const hit = optionAnchorsGoal(g, o, { allOptions: options })
       if (hit === 'RESOLVED') {
+        // flight_day_specific RESOLVED only with concrete schedule fields
+        if (g.kind === 'flight_day_specific') {
+          const ok =
+            flightOptionHasConcreteArrival(o) &&
+            Boolean(String(o.provider ?? o.carrier ?? '').trim()) &&
+            typeof o.sourceUrl === 'string' &&
+            /^https?:\/\//i.test(String(o.sourceUrl))
+          if (!ok) {
+            status = 'PARTIAL'
+            evidenceNote = `flight anchored but missing day-specific fields (startAt/provider)`
+            continue
+          }
+        }
         status = 'RESOLVED'
         evidenceNote = `anchored ${String(o.sourceUrl)}`
         break
@@ -641,6 +885,214 @@ export function assessResearchGoals(
   })
 }
 
+export function countFlightWebSearches(toolTrace: ToolTraceEntry[]): number {
+  return toolTrace.filter(
+    (t) =>
+      t.tool === 'webSearch' &&
+      t.ok &&
+      typeof t.args?.query === 'string' &&
+      isFlightResearchQuery(t.args.query),
+  ).length
+}
+
+export function countDirectedFlightRetries(toolTrace: ToolTraceEntry[]): number {
+  return toolTrace.filter(
+    (t) =>
+      t.tool === 'webSearch' &&
+      t.ok &&
+      typeof t.args?.query === 'string' &&
+      isDirectedFlightRetryQuery(t.args.query),
+  ).length
+}
+
+export function hasFlightFetchAttempt(toolTrace: ToolTraceEntry[]): boolean {
+  return toolTrace.some((t) => {
+    if (t.tool !== 'fetchUrl') return false
+    const url = String(t.args?.url ?? '')
+    return /volaris|aeromexico|viva|flight|vuelo|kayak|skyscanner|expedia|google\.com\/travel\/flights|flightconnections/i.test(
+      url,
+    )
+  })
+}
+
+export function buildDirectedFlightRetryQueries(input: {
+  prompt: string
+  tripDates: string[]
+  usedQueries: string[]
+}): string[] {
+  const used = new Set(input.usedQueries.map((q) => norm(q)))
+  const p = norm(input.prompt)
+  const date = input.tripDates[0] ?? ''
+  const dateHuman = date
+    ? (() => {
+        const [y, m, d] = date.split('-')
+        const months = [
+          '',
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ]
+        return `${d} ${months[Number(m)] ?? m} ${y}`
+      })()
+    : ''
+  const origin = /\bmex\b|ciudad de mexico|cdmx|aicm/.test(p) ? 'MEX' : 'origin'
+  const dest = /\bgdl\b|guadalajara/.test(p) ? 'GDL' : 'destination'
+  const carriers = ['Aeromexico', 'Volaris', 'Viva']
+  const out: string[] = []
+  for (const c of carriers) {
+    const q = `${origin} ${dest} ${dateHuman} ${c}`.trim()
+    if (q && !used.has(norm(q))) out.push(q)
+  }
+  const schedule = `${origin} ${dest} ${dateHuman} flight schedule`.trim()
+  if (schedule && !used.has(norm(schedule))) out.push(schedule)
+  return out.slice(0, 3)
+}
+
+/**
+ * First flight search only yielded bad evidence → need one directed retry
+ * before secondary lodging/event research.
+ */
+export function needsFlightDirectedRetry(input: {
+  goals: ResearchGoal[]
+  toolTrace: ToolTraceEntry[]
+  tripDates: string[]
+}): boolean {
+  const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
+  if (!flight) return false
+  if (flight.status === 'RESOLVED') return false
+  if (countFlightWebSearches(input.toolTrace) < 1) return false
+  if (countDirectedFlightRetries(input.toolTrace) >= 1) return false
+  // Already have day-specific candidate text somewhere
+  for (const t of input.toolTrace) {
+    for (const s of t.sources ?? []) {
+      if (
+        hasDaySpecificFlightEvidenceInText(
+          `${s.title ?? ''}\n${s.snippet ?? ''}`,
+          input.tripDates,
+        )
+      ) {
+        return false
+      }
+    }
+  }
+  const decisions = classifyCandidates(
+    input.toolTrace,
+    input.goals,
+    input.tripDates,
+  ).filter((c) => c.goalIds.includes(flight.id))
+  if (decisions.length === 0) return true
+  const bad = new Set([
+    'wrong_date',
+    'generic_landing_page',
+    'insufficient_evidence',
+    'insufficient_day_specific_evidence',
+    'aggregated_schedule',
+    'fetch_blocked_js',
+    'fetch_failed',
+    'wrong_route',
+    'duplicate',
+  ])
+  return decisions.every(
+    (c) => c.decision === 'rejected' && bad.has(c.reason),
+  )
+}
+
+/** Critical flight attempt finished (success or exhausted) — secondary may run. */
+export function flightCriticalAttemptExhausted(input: {
+  goals: ResearchGoal[]
+  toolTrace: ToolTraceEntry[]
+  tripDates: string[]
+}): boolean {
+  const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
+  if (!flight) return true
+  if (flight.status === 'RESOLVED' || flight.status === 'PARTIAL') return true
+  for (const t of input.toolTrace) {
+    for (const s of t.sources ?? []) {
+      if (
+        hasDaySpecificFlightEvidenceInText(
+          `${s.title ?? ''}\n${s.snippet ?? ''}`,
+          input.tripDates,
+        )
+      ) {
+        return true
+      }
+    }
+  }
+  // Directed retry done + fetch attempted (or nothing worth fetching)
+  if (countDirectedFlightRetries(input.toolTrace) >= 1) {
+    const accepted = classifyCandidates(
+      input.toolTrace,
+      input.goals,
+      input.tripDates,
+    ).filter(
+      (c) =>
+        c.goalIds.includes(flight.id) && c.decision === 'accepted',
+    )
+    if (accepted.length === 0) return true
+    if (hasFlightFetchAttempt(input.toolTrace)) return true
+    // accepted candidates exist but no fetch yet — not exhausted
+    return false
+  }
+  // 2+ flight searches without directed flag still counts as exhausted attempt
+  if (countFlightWebSearches(input.toolTrace) >= 2) return true
+  return false
+}
+
+export function shouldDeferSecondaryResearch(input: {
+  goals: ResearchGoal[]
+  toolTrace: ToolTraceEntry[]
+  tripDates: string[]
+}): boolean {
+  const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
+  if (!flight) return false
+  if (flight.status === 'RESOLVED') return false
+  return !flightCriticalAttemptExhausted(input)
+}
+
+/** Whether a pending tool call should be skipped to protect critical flight budget. */
+export function shouldSkipToolCallForFlightPriority(input: {
+  toolName: string
+  argsJson: string
+  goals: ResearchGoal[]
+  toolTrace: ToolTraceEntry[]
+  tripDates: string[]
+}): boolean {
+  if (!shouldDeferSecondaryResearch(input)) return false
+  if (input.toolName === 'webSearch') {
+    let query = ''
+    try {
+      const parsed = JSON.parse(input.argsJson) as { query?: string }
+      query = parsed.query ?? ''
+    } catch {
+      query = input.argsJson
+    }
+    return isSecondaryResearchQuery(query)
+  }
+  if (input.toolName === 'fetchUrl') {
+    let url = ''
+    try {
+      const parsed = JSON.parse(input.argsJson) as { url?: string }
+      url = parsed.url ?? ''
+    } catch {
+      url = input.argsJson
+    }
+    // Allow flight fetches; defer hotel/event pages
+    if (/hotel|airbnb|booking\.|trivago|tripadvisor|serenata|feria/i.test(url)) {
+      return true
+    }
+  }
+  return false
+}
+
 export function shouldForceAnotherResearchRound(input: {
   goals: ResearchGoal[]
   toolCallsUsed: number
@@ -651,11 +1103,43 @@ export function shouldForceAnotherResearchRound(input: {
   maxForcedRounds?: number
   /** True when at least one successful fetchUrl exists in toolTrace. */
   hasSuccessfulFetch?: boolean
+  toolTrace?: ToolTraceEntry[]
+  tripDates?: string[]
 }): boolean {
   const maxForced = input.maxForcedRounds ?? 2
   if (input.forcedExtraRounds >= maxForced) return false
   if (input.toolCallsUsed >= input.maxToolCalls) return false
   if (input.steps >= input.maxSteps - 1) return false
+
+  // Prefer critical flight directed retry before other open goals
+  if (
+    input.toolTrace &&
+    needsFlightDirectedRetry({
+      goals: input.goals,
+      toolTrace: input.toolTrace,
+      tripDates: input.tripDates ?? [],
+    })
+  ) {
+    return true
+  }
+
+  const criticalOpen = input.goals.filter(
+    (g) =>
+      g.tier === 'critical' &&
+      (g.status === 'UNRESOLVED' || g.status === 'PARTIAL'),
+  )
+  if (
+    criticalOpen.length > 0 &&
+    input.toolTrace &&
+    !flightCriticalAttemptExhausted({
+      goals: input.goals,
+      toolTrace: input.toolTrace,
+      tripDates: input.tripDates ?? [],
+    })
+  ) {
+    return true
+  }
+
   const importantOpen = input.goals.filter(
     (g) => g.important && g.status === 'UNRESOLVED',
   )
@@ -672,8 +1156,14 @@ export function buildDirectedResearchNudge(input: {
   goals: ResearchGoal[]
   toolTrace: ToolTraceEntry[]
   tripDates: string[]
+  prompt?: string
 }): string {
   const used = queriesUsed(input.toolTrace)
+  const flightRetry = needsFlightDirectedRetry({
+    goals: input.goals,
+    toolTrace: input.toolTrace,
+    tripDates: input.tripDates,
+  })
   const open = input.goals.filter(
     (g) => g.status === 'UNRESOLVED' || g.status === 'PARTIAL',
   )
@@ -682,6 +1172,42 @@ export function buildDirectedResearchNudge(input: {
     input.goals,
     input.tripDates,
   ).filter((c) => c.decision === 'accepted')
+
+  if (flightRetry) {
+    const suggested = buildDirectedFlightRetryQueries({
+      prompt: input.prompt ?? '',
+      tripDates: input.tripDates,
+      usedQueries: used,
+    })
+    const flightCands = candidates.filter((c) =>
+      c.goalIds.some((id) => id.includes('flight')),
+    )
+    const lines: string[] = [
+      'RESEARCH COVERAGE GATE (server): critical goal flight_day_specific remains UNRESOLVED after a generic search.',
+      'Do NOT spend tool budget on lodging/hotels/events yet.',
+      'Snippets are candidates only — never verificationStatus=verified from a Tavily snippet alone.',
+      'Do NOT repeat prior webSearch queries verbatim.',
+      '',
+      'Required now (pick within remaining budget):',
+      ...suggested.map((q) => `- webSearch: ${q}`),
+      '- If a candidate URL looks day-specific, fetchUrl it BEFORE lodging searches.',
+      '',
+      'Success criteria for flight_day_specific (does NOT auto-verify):',
+      'origin + destination + requested date + concrete departureTime + carrier + https sourceUrl.',
+      'If evidence cannot support that, leave UNRESOLVED — do not invent schedules.',
+    ]
+    if (flightCands.length) {
+      lines.push('', 'Promising flight URLs to fetchUrl:')
+      for (const c of flightCands.slice(0, 5)) {
+        lines.push(`- ${c.url}`)
+      }
+    }
+    if (used.length) {
+      lines.push('', 'Queries already used (do not repeat):')
+      for (const q of used) lines.push(`- ${q}`)
+    }
+    return lines.join('\n')
+  }
 
   const lines: string[] = [
     'RESEARCH COVERAGE GATE (server): important goals remain UNRESOLVED or PARTIAL.',
@@ -693,7 +1219,7 @@ export function buildDirectedResearchNudge(input: {
     'Open goals:',
     ...open.map(
       (g) =>
-        `- [${g.status}] ${g.id} (${g.kind}): ${g.label}${g.evidenceNote ? ` — ${g.evidenceNote}` : ''}`,
+        `- [${g.status}] ${g.id} (${g.kind}/${g.tier}): ${g.label}${g.evidenceNote ? ` — ${g.evidenceNote}` : ''}`,
     ),
   ]
 
@@ -712,11 +1238,9 @@ export function buildDirectedResearchNudge(input: {
   lines.push(
     '',
     'Suggested directed actions (pick what fits remaining budget):',
-    '- fetchUrl on a named hotel/event/official page candidate',
-    '- refined webSearch with exact date + route (MEX GDL 2026-09-19 schedule)',
-    '- webSearch terminal AICM vuelo nacional MEX GDL',
-    '- webSearch terminal Central Nueva OR operador autobús Guadalajara San Miguel el Alto',
-    '- webSearch serenata OR cartelera feria San Miguel el Alto 19 septiembre 2026',
+    '- fetchUrl on a promising flight/hotel/event candidate',
+    '- refined webSearch with exact date + route + carrier',
+    '- webSearch terminal AICM / bus operator only after flight attempt is exhausted',
     '',
     'When evidence is still insufficient after this round: leave estimated/pending/UNKNOWN and checklist ONLY for what remains unresolved.',
   )

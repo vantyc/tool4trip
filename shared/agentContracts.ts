@@ -230,6 +230,7 @@ export const agentProposalSchema = z
                 important: z.boolean(),
                 status: z.enum(['RESOLVED', 'PARTIAL', 'UNRESOLVED']),
                 evidenceNote: z.string().optional(),
+                tier: z.enum(['critical', 'supporting', 'secondary']).optional(),
               })
               .strict(),
           )
