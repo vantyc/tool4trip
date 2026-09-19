@@ -786,7 +786,17 @@ export async function runAgentAsk(
               ? Math.min(2, Math.max(0, deps.cfg.maxToolCalls - 2))
               : 0
           const softCap = deps.cfg.maxToolCalls - reserveForCoverage
-          for (const call of assistant.tool_calls) {
+          // After a coverage nudge, prefer fetchUrl before extra webSearch so
+          // remaining budget is spent on promising candidates first.
+          const orderedCalls = [...assistant.tool_calls]
+          if (forcedExtraRounds > 0) {
+            orderedCalls.sort((a, b) => {
+              const af = a.function.name === 'fetchUrl' ? 0 : 1
+              const bf = b.function.name === 'fetchUrl' ? 0 : 1
+              return af - bf
+            })
+          }
+          for (const call of orderedCalls) {
             if (toolCallsUsed >= softCap) {
               const checkedAt = nowIso()
               const reserved =
