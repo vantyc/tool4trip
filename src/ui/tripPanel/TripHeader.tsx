@@ -10,13 +10,24 @@ const LIGHT_LABEL: Record<IntegrityLight, string> = {
   red: 'Integridad baja',
 }
 
-export function TripHeader({ header }: { header: TripPanelHeader }) {
+export function TripHeader({
+  header,
+  hideTitle = false,
+}: {
+  header: TripPanelHeader
+  hideTitle?: boolean
+}) {
   return (
     <header className="tp-header">
-      <div className="tp-header-main">
-        <h2 className="tp-title">{header.title}</h2>
-        <p className="tp-status muted">{header.statusLabel}</p>
-      </div>
+      {!hideTitle && (
+        <div className="tp-header-main">
+          <h2 className="tp-title">{header.title}</h2>
+          <p className="tp-status muted">{header.statusLabel}</p>
+        </div>
+      )}
+      {hideTitle && (
+        <p className="tp-status muted tp-status-alone">{header.statusLabel}</p>
+      )}
       <dl className="tp-header-meta">
         {header.origin && (
           <div>
@@ -107,16 +118,20 @@ export function IntegritySummary({
           <strong>{diagnostics.sourceCount}</strong> fuentes
         </li>
       </ul>
-      {diagnostics.warnings.length > 0 && (
+      {diagnostics.warnings.filter((w) => w.trim()).length > 0 && (
         <details className="tp-integrity-warnings">
           <summary>
-            {diagnostics.warnings.length} advertencia
-            {diagnostics.warnings.length === 1 ? '' : 's'}
+            {diagnostics.warnings.filter((w) => w.trim()).length} advertencia
+            {diagnostics.warnings.filter((w) => w.trim()).length === 1
+              ? ''
+              : 's'}
           </summary>
           <ul>
-            {diagnostics.warnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
+            {diagnostics.warnings
+              .filter((w) => w.trim())
+              .map((w) => (
+                <li key={w}>{w}</li>
+              ))}
           </ul>
         </details>
       )}

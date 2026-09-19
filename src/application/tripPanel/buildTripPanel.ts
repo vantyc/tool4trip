@@ -2,6 +2,11 @@ import type {
   SharedTripPackageV1,
   AgentProposal,
 } from '../../../shared/agentContracts'
+import {
+  arrivalOffsetsFor,
+  extractIataCode,
+  subtractMinutesIso,
+} from '../../../shared/airportArrivalPolicy'
 import type {
   Booking,
   ChecklistItem,
@@ -11,6 +16,7 @@ import type {
   Trip,
 } from '../../domain/types'
 import type {
+  AirportArrivalInfo,
   TripPanelCard,
   TripPanelDiagnostics,
   TripPanelHeader,
@@ -36,13 +42,67 @@ function nightsBetween(start?: string, end?: string): number | undefined {
   return Math.floor((b - a) / 86_400_000)
 }
 
-function normPlace(s?: string): string {
+export function normPlace(s?: string): string {
   return (s ?? '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
+}
+
+/** Collapse near-duplicate place labels (substring / same normalized form). */
+export function dedupeDestinations(raw: string[]): string[] {
+  const cleaned = raw
+    .map((s) => s.trim())
+    .filter((s) => s && s !== UNKNOWN)
+  // Prefer longer / more specific labels first
+  const ranked = [...cleaned].sort(
+    (a, b) => normPlace(b).length - normPlace(a).length || b.length - a.length,
+  )
+  const out: string[] = []
+  for (const d of ranked) {
+    const n = normPlace(d)
+    if (!n) continue
+    const subsumed = out.some((kept) => {
+      const k = normPlace(kept)
+      return k === n || k.includes(n) || n.includes(k)
+    })
+    if (!subsumed) out.push(d)
+  }
+  // Prefer trip.destination order: keep first raw's cluster first when possible
+  if (cleaned[0]) {
+    const firstNorm = normPlace(cleaned[0])
+    out.sort((a, b) => {
+      const aHit = normPlace(a) === firstNorm || normPlace(a).includes(firstNorm) ? 0 : 1
+      const bHit = normPlace(b) === firstNorm || normPlace(b).includes(firstNorm) ? 0 : 1
+      return aHit - bHit
+    })
+  }
+  return out
+}
+
+export function isAirportArrivalActivity(
+  id: string,
+  title: string,
+): boolean {
+  if (id.startsWith('airport-arrival-')) return true
+  return /arribo al aeropuerto|airport arrival|check-?in aeropuerto/i.test(
+    title,
+  )
+}
+
+function filterNonEmptyWarnings(ws: string[] | undefined): string[] {
+  if (!ws?.length) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const w of ws) {
+    const t = w.trim()
+    if (!t || seen.has(t)) continue
+    seen.add(t)
+    out.push(t)
+  }
+  return out
 }
 
 function isReturnFlight(o: {
@@ -87,10 +147,40 @@ function visualFromOption(o: {
   return 'pending'
 }
 
+/** Soft statuses must not surface inventable concrete price/clock in the UI. */
+function allowsConcreteDisplay(status: VisualStatus): boolean {
+  return status === 'verified' || status === 'confirmed'
+}
+
 function truncate(s: string, n: number): string {
   const t = s.trim()
   if (t.length <= n) return t
   return `${t.slice(0, n - 1)}…`
+}
+
+export function deriveAirportArrival(o: {
+  startAt?: string
+  origin?: string
+  destination?: string
+}): AirportArrivalInfo | undefined {
+  if (!o.startAt) return undefined
+  const { scope, deskMinutes, onlineMinutes } = arrivalOffsetsFor(
+    o.origin,
+    o.destination,
+  )
+  const deskAt = subtractMinutesIso(o.startAt, deskMinutes)
+  const onlineAt = subtractMinutesIso(o.startAt, onlineMinutes)
+  if (!deskAt || !onlineAt) return undefined
+  const airportLabel =
+    extractIataCode(o.origin) || o.origin?.trim() || 'aeropuerto de salida'
+  return {
+    deskAt,
+    onlineAt,
+    deskMinutes,
+    onlineMinutes,
+    scope,
+    airportLabel,
+  }
 }
 
 function optionToCard(
@@ -114,23 +204,35 @@ function optionToCard(
     bookingId?: string
   },
   kind: TripPanelCard['kind'],
+  opts?: { retainSchedule?: boolean },
 ): TripPanelCard {
+  const status = visualFromOption(o)
   const card: TripPanelCard = {
     id: o.externalId || o.id || `${kind}-${o.title}`,
     kind,
     title: o.title,
-    status: visualFromOption(o),
+    status,
   }
-  if (o.startAt) card.startAt = o.startAt
-  if (o.endAt) card.endAt = o.endAt
+  const concrete = allowsConcreteDisplay(status)
+  const scheduleOk = concrete || Boolean(opts?.retainSchedule)
+  if (scheduleOk && o.startAt) card.startAt = o.startAt
+  if (scheduleOk && o.endAt) card.endAt = o.endAt
   if (o.origin) card.origin = o.origin
   if (o.destination) card.destination = o.destination
   if (o.provider) card.provider = o.provider
-  if (o.priceObserved !== undefined) card.price = o.priceObserved
-  if (o.currency) card.currency = o.currency
+  if (concrete && o.priceObserved !== undefined) card.price = o.priceObserved
+  if (concrete && o.currency) card.currency = o.currency
   if (o.sourceUrl) card.sourceUrl = o.sourceUrl
   if (o.address) card.place = o.address
   if (o.notes) card.notes = o.notes
+  if (
+    (kind === 'flight_out' || kind === 'flight_return') &&
+    scheduleOk &&
+    o.startAt
+  ) {
+    const arrival = deriveAirportArrival(o)
+    if (arrival) card.airportArrival = arrival
+  }
   return card
 }
 
@@ -152,7 +254,7 @@ export function computeTripPanelDiagnostics(input: {
   activityTitles: string[]
   transportLegs: Array<{ origin?: string; destination?: string; startAt?: string; title: string }>
 }): TripPanelDiagnostics {
-  const warnings: string[] = [...(input.agentWarnings ?? [])]
+  const warnings: string[] = filterNonEmptyWarnings(input.agentWarnings)
   const sourceCount = input.sourceUrls.length
 
   if (sourceCount === 0) {
@@ -162,12 +264,13 @@ export function computeTripPanelDiagnostics(input: {
   const priced = input.cards.filter(
     (c) =>
       ['flight_out', 'flight_return', 'ground', 'lodging'].includes(c.kind) &&
-      c.status !== 'missing',
+      c.status !== 'missing' &&
+      allowsConcreteDisplay(c.status),
   )
   const withoutPrice = priced.filter((c) => c.price === undefined)
   if (withoutPrice.length > 0) {
     warnings.push(
-      `Opciones sin precio: ${withoutPrice.length} (transporte/hospedaje sin priceObserved).`,
+      `Opciones verificadas sin precio: ${withoutPrice.length} (transporte/hospedaje sin priceObserved).`,
     )
   }
 
@@ -188,13 +291,11 @@ export function computeTripPanelDiagnostics(input: {
   }
 
   // Duplicate destinations (same normalized place listed >1 as distinct raw strings)
-  const destNorms = input.destinationsRaw.map(normPlace).filter(Boolean)
-  const destCounts = new Map<string, number>()
-  for (const d of destNorms) destCounts.set(d, (destCounts.get(d) ?? 0) + 1)
-  for (const [d, n] of destCounts) {
-    if (n > 1) {
-      warnings.push(`Destinos repetidos: «${d}» aparece ${n} veces.`)
-    }
+  const destUniqueCheck = dedupeDestinations(input.destinationsRaw)
+  if (destUniqueCheck.length < input.destinationsRaw.filter((d) => normPlace(d)).length) {
+    warnings.push(
+      'Destinos del header normalizados: se colapsaron etiquetas repetidas o contenidas.',
+    )
   }
 
   // Duplicate activities
@@ -234,9 +335,9 @@ export function computeTripPanelDiagnostics(input: {
     }
   }
 
-  // Missing dates on non-missing cards
+  // Missing dates on verified/confirmed cards only (estimado omits clocks by design)
   for (const c of input.cards) {
-    if (c.status === 'missing') continue
+    if (!allowsConcreteDisplay(c.status)) continue
     if (
       ['flight_out', 'flight_return', 'ground', 'lodging', 'activity'].includes(
         c.kind,
@@ -290,12 +391,7 @@ export function computeTripPanelDiagnostics(input: {
   else if (verifiedCount === 0 || pendingCount > verifiedCount) integrityLight = 'amber'
 
   // Dedupe warnings (keep order)
-  const seen = new Set<string>()
-  const uniq = warnings.filter((w) => {
-    if (seen.has(w)) return false
-    seen.add(w)
-    return true
-  })
+  const uniq = filterNonEmptyWarnings(warnings)
 
   return {
     verifiedCount,
@@ -354,11 +450,12 @@ export function buildTripPanelFromPackage(
     ['bus', 'train', 'transfer', 'car_rental'].includes(o.type),
   )
   const lodging = pkg.travelOptions.filter((o) => o.type === 'lodging')
-  const activities = [
-    ...pkg.travelOptions.filter((o) =>
-      ['activity', 'event', 'restaurant'].includes(o.type),
-    ),
-    ...pkg.itineraryItems.map((i) => ({
+  const activityOpts = pkg.travelOptions.filter((o) =>
+    ['activity', 'event', 'restaurant'].includes(o.type),
+  )
+  const itineraryActivities = pkg.itineraryItems
+    .filter((i) => !isAirportArrivalActivity(i.externalId, i.title))
+    .map((i) => ({
       externalId: i.externalId,
       type: 'activity',
       title: i.title,
@@ -368,20 +465,29 @@ export function buildTripPanelFromPackage(
       notes: i.notes,
       verificationStatus: undefined as string | undefined,
       sourceUrl: undefined as string | undefined,
-    })),
-  ]
-
+    }))
   const flightsOut = outbound.map((o) => optionToCard(o, 'flight_out'))
   const flightsReturn = returns.map((o) => {
     const c = optionToCard(o, 'flight_return')
     if (isAlternative(o)) c.status = 'alternative'
+    // Alternative inherits soft status → no concrete clocks/prices
+    if (c.status === 'alternative') {
+      delete c.startAt
+      delete c.endAt
+      delete c.price
+      delete c.currency
+      delete c.airportArrival
+    }
     return c
   })
   const groundCards = ground.map((o) => optionToCard(o, 'ground'))
   const lodgingCards = lodging.map((o) => optionToCard(o, 'lodging'))
-  const activityCards = activities.map((o) =>
-    optionToCard(o, 'activity'),
-  )
+  const activityCards = [
+    ...activityOpts.map((o) => optionToCard(o, 'activity')),
+    ...itineraryActivities.map((o) =>
+      optionToCard(o, 'activity', { retainSchedule: true }),
+    ),
+  ]
 
   const nights = nightsBetween(pkg.trip.startDate, pkg.trip.endDate)
   const cards: TripPanelCard[] = [
@@ -436,7 +542,7 @@ export function buildTripPanelFromPackage(
   const diagnostics = computeTripPanelDiagnostics({
     cards,
     sourceUrls,
-    agentWarnings: opts?.warnings,
+    agentWarnings: filterNonEmptyWarnings(opts?.warnings),
     nights,
     hasOutboundFlight: flightsOut.length > 0,
     hasReturnFlight: flightsReturn.length > 0,
@@ -452,11 +558,7 @@ export function buildTripPanelFromPackage(
     })),
   })
 
-  // Prefer unique destinations for header
-  const destUnique: string[] = []
-  for (const d of destinationsRaw) {
-    if (!destUnique.some((x) => normPlace(x) === normPlace(d))) destUnique.push(d)
-  }
+  const destUnique = dedupeDestinations(destinationsRaw)
 
   const origin =
     outbound[0]?.origin ??
@@ -480,6 +582,8 @@ export function buildTripPanelFromPackage(
     progressPct: progressFromDiagnostics(diagnostics, totalSlots),
   }
 
+  const agentWarnings = filterNonEmptyWarnings(opts?.warnings)
+
   return {
     header,
     diagnostics,
@@ -498,7 +602,7 @@ export function buildTripPanelFromPackage(
       : undefined,
     technical: {
       narrative: opts?.narrative,
-      warnings: diagnostics.warnings,
+      warnings: agentWarnings,
       jsonText: opts?.includeTechnicalJson
         ? JSON.stringify(pkg, null, 2)
         : undefined,

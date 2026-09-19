@@ -16,6 +16,9 @@ import {
   buildTripPanelFromPackage,
   buildTripPanelFromPersisted,
   buildTripPanelFromProposal,
+  dedupeDestinations,
+  deriveAirportArrival,
+  isAirportArrivalActivity,
 } from './buildTripPanel.ts'
 
 const fixDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -103,8 +106,9 @@ describe('tripPanel model', () => {
     const flight = model.flightsOut[0]!
     assert.equal(flight.startAt, undefined)
     assert.equal(flight.price, undefined)
+    // Soft status: no "fecha ausente" nag — clocks are omitted by design
     assert.ok(
-      model.diagnostics.warnings.some((w) => /fecha\/hora ausente/i.test(w)),
+      !model.diagnostics.warnings.some((w) => /fecha\/hora ausente/i.test(w)),
     )
     // Card must not invent provider/price fields
     assert.equal(flight.provider, undefined)
@@ -214,6 +218,10 @@ describe('tripPanel model', () => {
     assert.equal(model.lodging.length, 1)
     assert.equal(model.checklist.length, 1)
     assert.equal(model.notes.length, 1)
+    // Estimated flights must not surface inventable clocks/prices
+    assert.equal(model.flightsOut[0]!.startAt, undefined)
+    assert.equal(model.flightsOut[0]!.airportArrival, undefined)
+    assert.equal(model.flightsOut[0]!.price, undefined)
   })
 
   it('proposal wrapper includes draft status and budget when present', () => {
@@ -238,5 +246,79 @@ describe('tripPanel model', () => {
     assert.equal(model.header.budgetAmount, 5000)
     assert.equal(model.header.budgetCurrency, 'MXN')
     assert.ok((model.executiveSummary?.length ?? 0) <= 221)
+  })
+
+  it('8: estimado no muestra precio/horario inventado; verified sí + arribo', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    const model = buildTripPanelFromPackage(pkg)
+    assert.equal(model.flightsOut[0]!.status, 'estimated')
+    assert.equal(model.flightsOut[0]!.startAt, undefined)
+    assert.equal(model.flightsOut[0]!.price, undefined)
+    assert.equal(model.flightsOut[0]!.airportArrival, undefined)
+
+    const verified = loadPkg('complete-with-sources.json')
+    const vModel = buildTripPanelFromPackage(verified)
+    assert.equal(vModel.flightsOut[0]!.status, 'verified')
+    assert.ok(vModel.flightsOut[0]!.startAt)
+    assert.ok(vModel.flightsOut[0]!.airportArrival)
+    assert.match(
+      vModel.flightsOut[0]!.airportArrival!.airportLabel,
+      /MEX/,
+    )
+    // Airport arrival itinerary rows are not duplicated as activities
+    assert.ok(
+      !vModel.activities.some((a) =>
+        isAirportArrivalActivity(a.id, a.title),
+      ),
+    )
+  })
+
+  it('9: destinos del header se normalizan/deduplican por contención', () => {
+    const dests = dedupeDestinations([
+      'San Miguel el Alto, Jalisco',
+      'San Miguel el Alto',
+      'San Miguel el Alto',
+      'GDL',
+    ])
+    assert.equal(dests.length, 2)
+    assert.ok(dests.some((d) => /San Miguel/i.test(d)))
+    assert.ok(dests.some((d) => d === 'GDL'))
+  })
+
+  it('10: deriveAirportArrival solo con startAt', () => {
+    assert.equal(deriveAirportArrival({ origin: 'MEX', destination: 'GDL' }), undefined)
+    const info = deriveAirportArrival({
+      startAt: '2026-09-19T13:00:00-06:00',
+      origin: 'MEX',
+      destination: 'GDL',
+    })
+    assert.ok(info)
+    assert.equal(info!.scope, 'domestic')
+    assert.equal(info!.deskMinutes, 150)
+  })
+
+  it('11: advertencias vacías no pasan al detalle técnico', () => {
+    const pkg = loadPkg('complete-with-sources.json')
+    const model = buildTripPanelFromPackage(pkg, {
+      warnings: ['', '  ', 'aviso real'],
+      includeTechnicalJson: true,
+    })
+    assert.deepEqual(model.technical?.warnings, ['aviso real'])
+  })
+
+  it('12: airport-arrival itinerary filtered from activities', () => {
+    const pkg = loadPkg('complete-with-sources.json')
+    pkg.itineraryItems.push({
+      externalId: 'airport-arrival-desk-flt-out',
+      title: 'Arribo al aeropuerto MEX',
+      startAt: '2026-10-01T06:30:00-06:00',
+      place: 'MEX',
+      importance: 'crucial',
+      notes: 'policy',
+    })
+    const model = buildTripPanelFromPackage(pkg)
+    assert.ok(
+      !model.activities.some((a) => a.id.startsWith('airport-arrival-')),
+    )
   })
 })

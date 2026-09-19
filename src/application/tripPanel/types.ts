@@ -22,12 +22,22 @@ export type TripPanelCardKind =
   | 'source'
   | 'missing_slot'
 
+/** Policy-derived airport desk arrival (not LLM-invented). */
+export type AirportArrivalInfo = {
+  deskAt: string
+  onlineAt: string
+  deskMinutes: number
+  onlineMinutes: number
+  scope: 'domestic' | 'international'
+  airportLabel: string
+}
+
 export type TripPanelCard = {
   id: string
   kind: TripPanelCardKind
   title: string
   status: VisualStatus
-  /** Only set when present in source data — UI must not invent. */
+  /** Only set when present with provenance — UI must not invent. */
   startAt?: string
   endAt?: string
   origin?: string
@@ -39,6 +49,8 @@ export type TripPanelCard = {
   place?: string
   notes?: string
   body?: string
+  /** FlightCard only — derived from startAt via airportArrivalPolicy. */
+  airportArrival?: AirportArrivalInfo
 }
 
 export type IntegrityLight = 'green' | 'amber' | 'red'
@@ -85,6 +97,7 @@ export type TripPanelModel = {
   /** Collapsible technical payload. */
   technical?: {
     narrative?: string
+    /** Agent/server warnings only (not integrity diagnostics). */
     warnings: string[]
     jsonText?: string
   }

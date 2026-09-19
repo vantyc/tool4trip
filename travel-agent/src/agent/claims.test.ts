@@ -9,6 +9,7 @@ import {
   isDaySpecificFlightAsk,
   resolveClaimEvidence,
   scrubOperationalFreeText,
+  scrubUngroundedConcreteFields,
   validateClaimsAgainstToolTrace,
   type AgentClaimLlm,
 } from './claims.ts'
@@ -621,5 +622,111 @@ describe('day-specific flight ask vs weekly aggregate', () => {
     assert.match(warnings, /omitido agregado/)
     assert.match(warnings, /fecha pedida/)
     assert.doesNotMatch(warnings, /server: evidencia \(other_factual\): Hay 591/)
+  })
+
+  it('skeleton: strips estimated price/schedule without provenance; keeps verified', () => {
+    const draft = {
+      narrative: 'esqueleto',
+      warnings: [],
+      diffSummary: [],
+      ops: [],
+      claims: [],
+      package: {
+        schemaVersion: 1,
+        packageId: 'pkg-skel',
+        revision: 1,
+        trip: {
+          id: 't1',
+          title: 'SMA',
+          startDate: '2026-09-19',
+          endDate: '2026-09-22',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        travelOptions: [
+          {
+            externalId: 'flt-est',
+            type: 'flight',
+            status: 'researched',
+            title: 'MEX→GDL estimado',
+            origin: 'MEX',
+            destination: 'GDL',
+            startAt: '2026-09-19T10:00:00-06:00',
+            priceObserved: 1999,
+            currency: 'MXN',
+            verificationStatus: 'estimated',
+            sourceType: 'agent',
+          },
+          {
+            externalId: 'flt-ver',
+            type: 'flight',
+            status: 'shortlisted',
+            title: 'MEX→GDL verificado',
+            origin: 'MEX',
+            destination: 'GDL',
+            startAt: '2026-09-19T11:00:00-06:00',
+            priceObserved: 1800,
+            currency: 'MXN',
+            verificationStatus: 'verified',
+            sourceType: 'agent',
+            sourceUrl: 'https://example.com/flight',
+          },
+        ],
+        itineraryItems: [
+          {
+            externalId: 'goal-serenata',
+            title: 'Serenata',
+            startAt: '2026-09-20T20:00:00-06:00',
+            notes: 'pendiente',
+          },
+        ],
+        checklistItems: [],
+        notes: [],
+      },
+    }
+    const g = assertDraftGrounded(draft, [], undefined, {
+      allowSkeletonPackage: true,
+    })
+    assert.equal(g.ok, true)
+    if (!g.ok) throw new Error('expected ok')
+    const opts = (
+      g.draft.package as {
+        travelOptions: Array<Record<string, unknown>>
+        itineraryItems: Array<Record<string, unknown>>
+      }
+    ).travelOptions
+    const est = opts.find((o) => o.externalId === 'flt-est')!
+    const ver = opts.find((o) => o.externalId === 'flt-ver')!
+    assert.equal(est.startAt, undefined)
+    assert.equal(est.priceObserved, undefined)
+    assert.equal(est.currency, undefined)
+    assert.equal(ver.startAt, '2026-09-19T11:00:00-06:00')
+    assert.equal(ver.priceObserved, 1800)
+    const itin = (
+      g.draft.package as { itineraryItems: Array<Record<string, unknown>> }
+    ).itineraryItems[0]!
+    assert.equal(itin.startAt, undefined)
+    assert.match(String(itin.notes), /2026-09-20/)
+  })
+
+  it('scrubUngroundedConcreteFields is idempotent on already-clean package', () => {
+    const draft = {
+      package: {
+        travelOptions: [
+          {
+            externalId: 'x',
+            type: 'flight',
+            title: 'X',
+            verificationStatus: 'estimated',
+          },
+        ],
+        itineraryItems: [],
+      },
+    }
+    const w1 = scrubUngroundedConcreteFields(draft, { scrubItineraryClocks: true })
+    const w2 = scrubUngroundedConcreteFields(draft, { scrubItineraryClocks: true })
+    assert.equal(w1.length, 0)
+    assert.equal(w2.length, 0)
   })
 })

@@ -9,60 +9,69 @@ export type TripPanelProps = {
   actions?: ReactNode
   /** Show empty-section placeholders. */
   showEmptySections?: boolean
+  /**
+   * When embedded under an existing trip header, omit the duplicate title
+   * and tighten vertical rhythm.
+   */
+  embedded?: boolean
 }
 
 export function TripPanel({
   model,
   actions,
   showEmptySections = true,
+  embedded = false,
 }: TripPanelProps) {
   const empty = showEmptySections ? 'Sin datos en la propuesta.' : undefined
+  const techWarnings = model.technical?.warnings.filter((w) => w.trim()) ?? []
 
   return (
-    <div className="tp-panel">
-      <TripHeader header={model.header} />
+    <div className={`tp-panel${embedded ? ' tp-panel-embedded' : ''}`}>
+      <TripHeader header={model.header} hideTitle={embedded} />
       <IntegritySummary diagnostics={model.diagnostics} />
 
       {model.executiveSummary && (
         <p className="tp-executive">{model.executiveSummary}</p>
       )}
 
-      <CardSection
-        title="Vuelos de ida"
-        cards={model.flightsOut}
-        emptyLabel={empty}
-      />
-      <CardSection
-        title="Vuelos de regreso"
-        cards={model.flightsReturn}
-        emptyLabel={empty}
-      />
-      <CardSection
-        title="Traslados terrestres"
-        cards={model.ground}
-        emptyLabel={empty}
-      />
-      <CardSection
-        title="Hospedaje"
-        cards={model.lodging}
-        emptyLabel={empty}
-      />
-      <CardSection
-        title="Actividades e itinerario"
-        cards={model.activities}
-        emptyLabel={empty}
-      />
-      <CardSection
-        title="Pendientes"
-        cards={model.checklist}
-        emptyLabel={empty}
-      />
-      <CardSection title="Notas" cards={model.notes} emptyLabel={empty} />
-      <CardSection
-        title="Fuentes"
-        cards={model.sources}
-        emptyLabel={showEmptySections ? 'Sin URLs verificables.' : undefined}
-      />
+      <div className="tp-sections">
+        <CardSection
+          title="Vuelos de ida"
+          cards={model.flightsOut}
+          emptyLabel={empty}
+        />
+        <CardSection
+          title="Vuelos de regreso"
+          cards={model.flightsReturn}
+          emptyLabel={empty}
+        />
+        <CardSection
+          title="Traslados terrestres"
+          cards={model.ground}
+          emptyLabel={empty}
+        />
+        <CardSection
+          title="Hospedaje"
+          cards={model.lodging}
+          emptyLabel={empty}
+        />
+        <CardSection
+          title="Actividades e itinerario"
+          cards={model.activities}
+          emptyLabel={empty}
+        />
+        <CardSection
+          title="Pendientes"
+          cards={model.checklist}
+          emptyLabel={empty}
+        />
+        <CardSection title="Notas" cards={model.notes} emptyLabel={empty} />
+        <CardSection
+          title="Fuentes"
+          cards={model.sources}
+          emptyLabel={showEmptySections ? 'Sin URLs verificables.' : undefined}
+        />
+      </div>
 
       {model.technical && (
         <details className="tp-technical">
@@ -73,11 +82,11 @@ export function TripPanel({
               <p className="tp-tech-pre">{model.technical.narrative}</p>
             </div>
           )}
-          {model.technical.warnings.length > 0 && (
+          {techWarnings.length > 0 && (
             <div className="tp-tech-block">
-              <h4>Advertencias</h4>
+              <h4>Advertencias del agente</h4>
               <ul>
-                {model.technical.warnings.map((w) => (
+                {techWarnings.map((w) => (
                   <li key={w}>{w}</li>
                 ))}
               </ul>

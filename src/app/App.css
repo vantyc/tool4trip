@@ -9,6 +9,12 @@
     max(1.25rem, env(safe-area-inset-left));
 }
 
+@media (min-width: 960px) {
+  .app-shell:has(.tp-panel) {
+    max-width: 68rem;
+  }
+}
+
 .app-header {
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--line);
@@ -747,21 +753,48 @@ button:disabled {
 .tp-integrity {
   padding: 0.75rem 0.85rem;
   border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg-accent) 40%, white);
+  background: var(--bg-accent);
+  color: var(--ink);
   display: grid;
   gap: 0.55rem;
 }
 
 .tp-integrity-green {
   border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
+  background: color-mix(in srgb, var(--ok) 12%, var(--bg-accent));
 }
 
 .tp-integrity-amber {
   border-color: #b08900;
+  background: color-mix(in srgb, #b08900 14%, var(--bg-accent));
 }
 
 .tp-integrity-red {
   border-color: color-mix(in srgb, var(--bad) 55%, var(--line));
+  background: color-mix(in srgb, var(--bad) 12%, var(--bg-accent));
+}
+
+@media (prefers-color-scheme: dark) {
+  .tp-integrity {
+    background: color-mix(in srgb, var(--bg-accent) 70%, var(--ink) 8%);
+    color: var(--ink);
+  }
+
+  .tp-integrity-green {
+    background: color-mix(in srgb, var(--ok) 22%, var(--bg));
+  }
+
+  .tp-integrity-amber {
+    background: color-mix(in srgb, #b08900 22%, var(--bg));
+  }
+
+  .tp-integrity-red {
+    background: color-mix(in srgb, var(--bad) 22%, var(--bg));
+  }
+
+  .tp-badge-estimated {
+    color: #d4c48a;
+  }
 }
 
 .tp-integrity-light {
@@ -837,10 +870,73 @@ button:disabled {
   }
 }
 
+@media (min-width: 960px) {
+  .tp-sections {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .tp-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tp-header-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tp-panel-embedded .tp-header-meta {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .tp-card {
   border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg) 92%, white);
+  background: var(--bg);
   padding: 0.7rem 0.75rem;
+}
+
+.tp-card-flight_out,
+.tp-card-flight_return {
+  border-left: 3px solid color-mix(in srgb, var(--ink) 35%, var(--line));
+}
+
+.tp-card-lodging {
+  border-left: 3px solid color-mix(in srgb, var(--ok) 40%, var(--line));
+}
+
+.tp-flight-arrival {
+  margin-top: 0.55rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed var(--line);
+}
+
+.tp-flight-arrival-title {
+  margin: 0 0 0.2rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-muted);
+}
+
+.tp-flight-arrival-body {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.tp-source-link {
+  margin: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.tp-status-alone {
+  margin: 0 0 0.35rem;
+}
+
+.tp-panel-embedded .tp-header {
+  padding-bottom: 0.5rem;
 }
 
 .tp-card-missing {

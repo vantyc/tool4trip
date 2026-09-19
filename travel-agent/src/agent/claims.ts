@@ -1030,6 +1030,8 @@ export function applyClaimsSourceOfTruth(
     if (!target) return
     target.priceObserved = fields.priceObserved
     target.currency = fields.currency
+    // Provenance for the scrub gate: grounded price claim ⇒ verified.
+    target.verificationStatus = 'verified'
     target.notes = appendNote(
       target.notes,
       `Precio observado (claim): ${fields.literal}`,
@@ -1067,7 +1069,127 @@ export function applyClaimsSourceOfTruth(
   }
 
   draft.package = pkg
+  // After claim rewrite, still drop inventable clocks/prices without provenance
+  // (price claims already re-applied above; this strips leftover LLM schedules).
+  const concreteWarnings = scrubUngroundedConcreteFields(draft)
+  serverWarnings.push(...concreteWarnings)
   return { draft, serverWarnings }
+}
+
+/**
+ * Provenance gate for inventable concrete facts (price, clock schedule).
+ * - Schedule clocks require verified + https sourceUrl.
+ * - Prices also accept claim-rewritten verified rows (note marker) when URL-less context claims apply.
+ */
+export function hasScheduleProvenance(rec: Record<string, unknown>): boolean {
+  const status = typeof rec.verificationStatus === 'string' ? rec.verificationStatus : ''
+  const url = typeof rec.sourceUrl === 'string' ? rec.sourceUrl.trim() : ''
+  return status === 'verified' && /^https?:\/\//i.test(url)
+}
+
+export function hasPriceProvenance(rec: Record<string, unknown>): boolean {
+  if (hasScheduleProvenance(rec)) return true
+  const status = typeof rec.verificationStatus === 'string' ? rec.verificationStatus : ''
+  if (status !== 'verified') return false
+  const notes = typeof rec.notes === 'string' ? rec.notes : ''
+  return /Precio observado \(claim\):/.test(notes)
+}
+
+/** @deprecated use hasScheduleProvenance / hasPriceProvenance */
+export function hasConcreteProvenance(rec: Record<string, unknown>): boolean {
+  return hasScheduleProvenance(rec)
+}
+
+function datePrefixFromIso(iso: unknown): string | undefined {
+  if (typeof iso !== 'string') return undefined
+  const m = iso.match(/^(\d{4}-\d{2}-\d{2})/)
+  return m?.[1]
+}
+
+/**
+ * Strip inventable concrete fields (priceObserved, currency, startAt, endAt)
+ * when the option/item lacks provenance.
+ * General rule for ESTIMADO/unverified — not a per-value patch.
+ * Returns server warning strings describing what was removed.
+ *
+ * @param opts.scrubItineraryClocks — also strip clocks from non-airport itinerary
+ *   rows (use for new_travel skeleton; leave false for mutation/research so
+ *   context-echoed itinerary times are preserved).
+ */
+export function scrubUngroundedConcreteFields(
+  draft: Record<string, unknown>,
+  opts?: { scrubItineraryClocks?: boolean },
+): string[] {
+  const warnings: string[] = []
+  const pkg =
+    draft.package && typeof draft.package === 'object'
+      ? (draft.package as Record<string, unknown>)
+      : null
+  if (!pkg) return warnings
+
+  const scrubOption = (raw: unknown, where: string) => {
+    if (!raw || typeof raw !== 'object') return raw
+    const rec = { ...(raw as Record<string, unknown>) }
+
+    const title =
+      typeof rec.title === 'string' && rec.title.trim()
+        ? rec.title.trim()
+        : where
+
+    if (
+      !hasPriceProvenance(rec) &&
+      (typeof rec.priceObserved === 'number' || typeof rec.currency === 'string')
+    ) {
+      delete rec.priceObserved
+      delete rec.currency
+      warnings.push(
+        `server: precio sin provenance eliminado de «${title}» (requerido verified+sourceUrl).`,
+      )
+    }
+
+    if (!hasScheduleProvenance(rec)) {
+      const hadStart = typeof rec.startAt === 'string' && rec.startAt.trim()
+      const hadEnd = typeof rec.endAt === 'string' && rec.endAt.trim()
+      if (hadStart || hadEnd) {
+        const dateHint =
+          datePrefixFromIso(rec.startAt) || datePrefixFromIso(rec.endAt)
+        delete rec.startAt
+        delete rec.endAt
+        if (dateHint && typeof rec.notes === 'string') {
+          if (!/fecha (objetivo|asociada):/i.test(rec.notes)) {
+            rec.notes = `${rec.notes}\nFecha asociada (sin hora verificada): ${dateHint}`
+          }
+        } else if (dateHint) {
+          rec.notes = `Fecha asociada (sin hora verificada): ${dateHint}`
+        }
+        warnings.push(
+          `server: horario concreto sin provenance eliminado de «${title}» (requerido verified+sourceUrl).`,
+        )
+      }
+    }
+
+    return rec
+  }
+
+  if (Array.isArray(pkg.travelOptions)) {
+    pkg.travelOptions = pkg.travelOptions.map((o, i) =>
+      scrubOption(o, `travelOptions[${i}]`),
+    )
+  }
+
+  if (opts?.scrubItineraryClocks && Array.isArray(pkg.itineraryItems)) {
+    pkg.itineraryItems = pkg.itineraryItems.map((item, i) => {
+      if (!item || typeof item !== 'object') return item
+      const rec = item as Record<string, unknown>
+      const id = typeof rec.externalId === 'string' ? rec.externalId : ''
+      // Server-authored airport arrivals are policy-derived; keep their clocks.
+      if (id.startsWith('airport-arrival-')) return item
+      return scrubOption(item, `itineraryItems[${i}]`)
+    })
+  }
+
+  draft.package = pkg
+  return warnings
 }
 
 function collectAllOperationalSignals(
@@ -1210,14 +1332,22 @@ export function assertDraftGrounded(
   }
 
   // new_travel skeleton: web claims still fail-closed above; estimated
-  // flight/hotel package fields skip residual SoT scan.
+  // flight/hotel package fields skip residual SoT scan — but never keep
+  // inventable concrete price/schedule without verified+sourceUrl provenance.
   if (opts?.allowSkeletonPackage) {
+    const concreteWarnings = scrubUngroundedConcreteFields(draft, {
+      scrubItineraryClocks: true,
+    })
     if (!Array.isArray(draft.warnings)) draft.warnings = []
     if (!Array.isArray(draft.ops)) draft.ops = []
+    const prev = (draft.warnings as unknown[]).filter(
+      (w): w is string => typeof w === 'string' && w.trim().length > 0,
+    )
+    draft.warnings = [...prev, ...concreteWarnings]
     return {
       ok: true,
       validClaims: valid,
-      serverWarnings: aggregateWarnings,
+      serverWarnings: [...aggregateWarnings, ...concreteWarnings],
       draft,
     }
   }

@@ -303,7 +303,7 @@ export function TripOverviewPage() {
       {panelBundle && (
         <section className="tp-plan-block" aria-labelledby="tp-plan">
           <h2 id="tp-plan">Plan del viaje</h2>
-          <TripPanel model={panelBundle} showEmptySections={false} />
+          <TripPanel model={panelBundle} showEmptySections={false} embedded />
         </section>
       )}
 

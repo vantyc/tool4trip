@@ -227,8 +227,11 @@ describe('SMA last-minute fixture (prod regression)', () => {
     const lodging = parsed.data.package.travelOptions.find(
       (o) => o.externalId === 'lodge-sma',
     )
-    assert.ok(lodging?.startAt && isIsoWithOffset(lodging.startAt))
-    assert.ok(lodging?.endAt && isIsoWithOffset(lodging.endAt))
+    assert.ok(lodging)
+    // Estimated lodging clocks are scrubbed (no inventable horario without provenance)
+    assert.equal(lodging!.startAt, undefined)
+    assert.equal(lodging!.endAt, undefined)
+    assert.equal(lodging!.verificationStatus, 'estimated')
   })
 
   it('repair-like second pass: still bare after "repair" gets normalized', () => {

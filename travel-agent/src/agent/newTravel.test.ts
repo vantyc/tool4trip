@@ -162,8 +162,16 @@ describe('new_travel coherence', () => {
       String(i.title).toLowerCase().includes('serenata'),
     )
     assert.ok(ser)
-    assert.match(String(ser!.startAt), /^2026-09-20/)
+    assert.equal(ser!.startAt, undefined)
+    assert.match(String(ser!.notes), /Fecha objetivo: 2026-09-20/)
     assert.match(String(ser!.notes), /pendiente de verificar/i)
+
+    const lodge = (pkg.travelOptions as Rec[]).find(
+      (o) => String(o.type) === 'lodging',
+    )
+    assert.ok(lodge)
+    assert.equal(lodge!.startAt, undefined)
+    assert.equal(lodge!.endAt, undefined)
 
     const stripped = stripLlmAirportArrivalItems(pkg)
     const airportish = (stripped.itineraryItems as Rec[]).filter((i) =>
@@ -289,8 +297,8 @@ describe('new_travel intent + enrich', () => {
     const arrivals = hydrated.package.itineraryItems.filter((i) =>
       i.externalId.startsWith('airport-arrival-'),
     )
-    // One desk arrival for each of 3 flights
-    assert.equal(arrivals.length, 3)
+    // Estimated flights lose inventable clocks before airport enrich
+    assert.equal(arrivals.length, 0)
     assert.ok(!arrivals.some((a) => a.externalId.includes('online')))
 
     const lodging = hydrated.package.travelOptions.filter((o) => o.type === 'lodging')
@@ -300,15 +308,99 @@ describe('new_travel intent + enrich', () => {
       /serenata/i.test(i.title),
     )
     assert.ok(ser)
-    assert.match(ser!.startAt ?? '', /^2026-09-20/)
+    assert.equal(ser!.startAt, undefined)
+    assert.match(ser!.notes ?? '', /Fecha objetivo: 2026-09-20/)
 
     const ret21 = hydrated.package.travelOptions.find((o) => o.externalId === 'flt-ret-21')
     const ret22 = hydrated.package.travelOptions.find((o) => o.externalId === 'flt-ret-22')
     assert.equal(ret22?.status, 'shortlisted')
     assert.equal(ret21?.status, 'researched')
 
+    assert.ok(hydrated.warnings.some((w) => /horario concreto sin provenance/i.test(w)))
+
     assert.ok(hydrated.warnings.some((w) => /3 noche/i.test(w)))
     assert.ok(hydrated.warnings.some((w) => /webSearch/i.test(w)))
+  })
+
+  it('hydrate new_travel keeps airport arrival when flight is verified+sourced', () => {
+    const tripId = '33333333-3333-4333-8333-333333333333'
+    const req: AgentAskRequest = {
+      prompt: 'MEX-GDL 19 sep 2026 regreso 22',
+      tripId,
+      mode: 'new_travel',
+      locale: 'es',
+      context: {
+        trip: {
+          id: tripId,
+          title: 'Nuevo viaje',
+          startDate: '2026-01-01',
+          endDate: '2026-01-02',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        bookings: [],
+        travelOptions: [],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+        packageImports: [],
+      },
+    }
+    const draft = {
+      narrative: 'Propuesta con horario verificado',
+      warnings: [],
+      diffSummary: [],
+      ops: [],
+      claims: [],
+      package: {
+        schemaVersion: 1,
+        packageId: `new-${tripId}`,
+        revision: 1,
+        trip: {
+          id: tripId,
+          title: 'SMA',
+          destination: 'GDL',
+          startDate: '2026-09-19',
+          endDate: '2026-09-22',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        travelOptions: [
+          {
+            externalId: 'flt-out',
+            type: 'flight',
+            status: 'shortlisted',
+            title: 'MEX → GDL',
+            origin: 'MEX',
+            destination: 'GDL',
+            startAt: '2026-09-19T10:00:00-06:00',
+            verificationStatus: 'verified',
+            sourceType: 'agent',
+            sourceUrl: 'https://example.com/flights/out',
+          },
+        ],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+      },
+    }
+    const hydrated = hydrateProposal(draft, req, [], { intent: 'new_travel' }) as {
+      package: {
+        travelOptions: { externalId: string; startAt?: string }[]
+        itineraryItems: { externalId: string }[]
+      }
+    }
+    assert.equal(
+      hydrated.package.travelOptions.find((o) => o.externalId === 'flt-out')
+        ?.startAt,
+      '2026-09-19T10:00:00-06:00',
+    )
+    const arrivals = hydrated.package.itineraryItems.filter((i) =>
+      i.externalId.startsWith('airport-arrival-'),
+    )
+    assert.equal(arrivals.length, 1)
   })
 
   it('hydrate new_travel keeps planned status (UI DRAFT until create)', () => {

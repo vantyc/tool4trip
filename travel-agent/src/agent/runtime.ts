@@ -26,7 +26,7 @@ import {
   buildRepairPrompt,
   buildSystemPrompt,
 } from './prompts.ts'
-import { assertDraftGrounded } from './claims.ts'
+import { assertDraftGrounded, scrubUngroundedConcreteFields } from './claims.ts'
 import {
   buildContextOnlyDraft,
   classifyAskIntent,
@@ -396,6 +396,13 @@ export function hydrateProposal(
   let pkg = asRecord(withoutClaims.package)
   const coherenceWarnings: string[] = []
   if (isNewTravel) {
+    // Defense in depth: strip inventable concrete facts before skeleton/airport
+    // enrich (also runs in assertDraftGrounded for the normal parse path).
+    const wrap: Record<string, unknown> = { package: pkg }
+    coherenceWarnings.push(
+      ...scrubUngroundedConcreteFields(wrap, { scrubItineraryClocks: true }),
+    )
+    pkg = asRecord(wrap.package)
     pkg = ensureNewTravelSkeleton(pkg, req.prompt)
     pkg = enrichPackageWithAirportArrivals(pkg)
     coherenceWarnings.push(

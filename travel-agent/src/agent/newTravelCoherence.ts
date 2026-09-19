@@ -178,6 +178,14 @@ function isReturnFlight(o: Rec): boolean {
 function flightDate(o: Rec): string {
   const startAt = str(o.startAt)
   if (/^\d{4}-\d{2}-\d{2}/.test(startAt)) return startAt.slice(0, 10)
+  // After scrubUngroundedConcreteFields, clocks move to notes as date hints.
+  const notes = str(o.notes)
+  const fromNotes = notes.match(
+    /Fecha asociada \(sin hora verificada\):\s*(\d{4}-\d{2}-\d{2})/i,
+  )
+  if (fromNotes?.[1]) return fromNotes[1]
+  const fromGoal = notes.match(/Fecha objetivo:\s*(\d{4}-\d{2}-\d{2})/i)
+  if (fromGoal?.[1]) return fromGoal[1]
   return ''
 }
 
@@ -218,12 +226,11 @@ export function ensureNewTravelSkeleton(
       status: 'researched',
       title: `Hospedaje ${dest} (estimado · ${nights} noche(s))`,
       destination: dest,
-      startAt: start ? `${start}T15:00:00-06:00` : undefined,
-      endAt: end ? `${end}T12:00:00-06:00` : undefined,
+      // No inventable check-in/out clocks — dates live in trip window + notes.
       verificationStatus: 'estimated',
       sourceType: 'agent',
       notes:
-        'Esqueleto de hospedaje — pendiente de verificar disponibilidad y precio con fuente actual. Sin sourceUrl.',
+        `Esqueleto de hospedaje — ventana ${start || '?'} → ${end || '?'}. Pendiente de verificar disponibilidad y precio con fuente actual. Sin sourceUrl.`,
     })
   }
 
@@ -291,11 +298,11 @@ export function ensureNewTravelSkeleton(
     itinerary.push({
       externalId: id,
       title: `${hint.charAt(0).toUpperCase() + hint.slice(1)} (objetivo del viajero)`,
-      startAt: `${goalDate}T20:00:00-06:00`,
+      // Date only in notes — no invented clock time on estimated goals.
       place: dest,
       importance: 'crucial',
       notes:
-        'Objetivo del viajero — pendiente de verificar con fuente actual. No afirmar que el evento ocurrirá sin sourceUrl en toolTrace.',
+        `Objetivo del viajero — Fecha objetivo: ${goalDate}. Pendiente de verificar con fuente actual. No afirmar que el evento ocurrirá sin sourceUrl en toolTrace.`,
     })
     const chkId = `chk-${id}`
     if (!checklist.some((c) => str(asRec(c).externalId) === chkId)) {
