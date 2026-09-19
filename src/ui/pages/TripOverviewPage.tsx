@@ -6,9 +6,11 @@ import {
   formatShortDate,
   formatTimeUntil,
 } from '../../application/summary'
+import { buildTripPanelFromPersisted } from '../../application/tripPanel'
 import type { ChecklistItem, DocumentMeta, Trip } from '../../domain/types'
 import { DEMO_TRIP_ID } from '../../seed/demoSanMiguel'
 import { useDocumentViewer } from '../documents/useDocumentViewer'
+import { TripPanel } from '../tripPanel'
 import { useCloudQuery } from '../useCloudQuery'
 import { useLiveQuery } from 'dexie-react-hooks'
 
@@ -59,6 +61,28 @@ export function TripOverviewPage() {
   } = useCloudQuery(
     `summary:${trip.id}:${nowIso}`,
     () => services.summary.getTripSummary(trip.id, new Date(nowIso)),
+  )
+
+  const { data: panelBundle } = useCloudQuery(
+    `trip-panel:${trip.id}`,
+    async () => {
+      const [options, itinerary, checklist, notes, bookings] =
+        await Promise.all([
+          services.travelOptions.listByTrip(trip.id),
+          services.itinerary.listByTrip(trip.id),
+          services.checklist.listByTrip(trip.id),
+          services.notes.listByTrip(trip.id),
+          services.bookings.listByTrip(trip.id),
+        ])
+      return buildTripPanelFromPersisted({
+        trip,
+        options,
+        itinerary,
+        checklist,
+        notes,
+        bookings,
+      })
+    },
   )
 
   const nextDocs =
@@ -275,6 +299,13 @@ export function TripOverviewPage() {
           </ul>
         )}
       </section>
+
+      {panelBundle && (
+        <section className="tp-plan-block" aria-labelledby="tp-plan">
+          <h2 id="tp-plan">Plan del viaje</h2>
+          <TripPanel model={panelBundle} showEmptySections={false} />
+        </section>
+      )}
 
       {Viewer}
     </section>

@@ -12,10 +12,14 @@ import type { ImportUpdatePlan } from '../../application/packageImport'
 import {
   discardNewTravelProposal,
   prepareNewTravelPackage,
-  summarizeNewTravelProposal,
   UNKNOWN,
 } from '../../application/newTravelProposal'
+import { buildTripPanelFromProposal } from '../../application/tripPanel'
+import { TripPanel } from '../tripPanel'
 import { useOnline } from '../useOnline'
+
+const CREATE_CONFIRM =
+  'Esta propuesta contiene componentes pendientes o faltantes y no tiene fuentes verificables. Puedes guardarla como borrador para completarla después.\n\n¿Crear el viaje de todos modos?'
 
 export function NewTravelPage() {
   const online = useOnline()
@@ -28,8 +32,8 @@ export function NewTravelPage() {
   const [proposal, setProposal] = useState<AgentProposal | null>(null)
   const [plan, setPlan] = useState<ImportUpdatePlan | null>(null)
 
-  const summary = useMemo(
-    () => (proposal ? summarizeNewTravelProposal(proposal) : null),
+  const panel = useMemo(
+    () => (proposal ? buildTripPanelFromProposal(proposal) : null),
     [proposal],
   )
 
@@ -65,7 +69,11 @@ export function NewTravelPage() {
   }
 
   async function handleCreate() {
-    if (!proposal) return
+    if (!proposal || !panel) return
+    if (panel.diagnostics.needsCreateConfirm) {
+      const ok = window.confirm(CREATE_CONFIRM)
+      if (!ok) return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -155,131 +163,38 @@ export function NewTravelPage() {
         </p>
       )}
 
-      {proposal && summary && (
+      {proposal && panel && (
         <div className="agent-proposal">
-          <h2>Propuesta (borrador)</h2>
-          <p>{proposal.narrative}</p>
-          {summary.warnings.length > 0 && (
-            <ul>
-              {summary.warnings.map((w) => (
-                <li key={w}>{w}</li>
-              ))}
-            </ul>
-          )}
-
-          <dl className="new-travel-summary">
-            <div>
-              <dt>Título</dt>
-              <dd>{summary.title}</dd>
-            </div>
-            <div>
-              <dt>Estado</dt>
-              <dd>
-                {summary.draftLabel} → al crear: {summary.domainStatus} (sin
-                reservas)
-              </dd>
-            </div>
-            <div>
-              <dt>Ventana</dt>
-              <dd>
-                {summary.startDate} → {summary.endDate} (
-                {summary.durationDays > 0
-                  ? `${summary.durationDays} día(s) · ${summary.nights} noche(s)`
-                  : UNKNOWN}
-                )
-              </dd>
-            </div>
-            <div>
-              <dt>Origen</dt>
-              <dd>{summary.origin}</dd>
-            </div>
-            <div>
-              <dt>Destinos</dt>
-              <dd>{summary.destinations.join(' · ')}</dd>
-            </div>
-            <div>
-              <dt>Transporte</dt>
-              <dd>
-                {summary.transport.length === 0
-                  ? UNKNOWN
-                  : summary.transport
-                      .map(
-                        (t) =>
-                          `${t.title} [${t.type}/${t.verification}]`,
-                      )
-                      .join('; ')}
-              </dd>
-            </div>
-            <div>
-              <dt>Hospedaje</dt>
-              <dd>
-                {summary.lodging.length === 0
-                  ? UNKNOWN
-                  : summary.lodging
-                      .map((l) => `${l.title} [${l.verification}]`)
-                      .join('; ')}
-              </dd>
-            </div>
-            <div>
-              <dt>Itinerario</dt>
-              <dd>
-                {summary.itinerary.length === 0
-                  ? UNKNOWN
-                  : summary.itinerary
-                      .map((i) => i.title)
-                      .slice(0, 8)
-                      .join('; ')}
-                {summary.itinerary.length > 8
-                  ? ` (+${summary.itinerary.length - 8})`
-                  : ''}
-              </dd>
-            </div>
-            <div>
-              <dt>Notas</dt>
-              <dd>
-                {summary.notes.length === 0
-                  ? UNKNOWN
-                  : summary.notes.map((n) => n.body).join(' · ')}
-              </dd>
-            </div>
-            <div>
-              <dt>Pendientes</dt>
-              <dd>
-                {summary.pending.length === 0
-                  ? UNKNOWN
-                  : summary.pending.map((p) => p.label).join('; ')}
-              </dd>
-            </div>
-            <div>
-              <dt>Fuentes</dt>
-              <dd>
-                {summary.sources.length === 0
-                  ? 'Sin URLs (esqueleto estimado / pendiente de verificar)'
-                  : summary.sources.join(' · ')}
-              </dd>
-            </div>
-          </dl>
-
-          {plan && (
-            <p className="muted">
-              Vista previa import: nuevas {plan.created}, actualizadas{' '}
-              {plan.updated}, sin cambios {plan.unchanged}
-              {!plan.isUpdate ? ' · crea viaje nuevo' : ''}
-            </p>
-          )}
-
-          <div className="actions">
-            <button
-              type="button"
-              onClick={() => void handleCreate()}
-              disabled={busy || !online}
-            >
-              Crear viaje
-            </button>
-            <button type="button" onClick={handleDiscard} disabled={busy}>
-              Descartar
-            </button>
-          </div>
+          <TripPanel
+            model={panel}
+            actions={
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handleCreate()}
+                  disabled={busy || !online}
+                >
+                  Crear viaje
+                </button>
+                <button type="button" onClick={handleDiscard} disabled={busy}>
+                  Descartar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handlePlan()}
+                  disabled={busy || !online || !prompt.trim()}
+                >
+                  Reintentar
+                </button>
+                {plan && (
+                  <span className="muted small">
+                    Vista previa: +{plan.created} · ~{plan.updated} · ={plan.unchanged}
+                    {!plan.isUpdate ? ' · crea viaje nuevo' : ''}
+                  </span>
+                )}
+              </>
+            }
+          />
         </div>
       )}
     </section>

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "packageId": "fixture-dupes",
+  "revision": 1,
+  "trip": {
+    "id": "trip-dup-1",
+    "title": "Duplicados",
+    "destination": "San Miguel",
+    "startDate": "2026-09-19",
+    "endDate": "2026-09-20",
+    "timezone": "America/Mexico_City",
+    "goals": [],
+    "status": "planned"
+  },
+  "travelOptions": [
+    {
+      "externalId": "flt-out",
+      "type": "flight",
+      "status": "researched",
+      "title": "Ida",
+      "origin": "MEX",
+      "destination": "San Miguel",
+      "startAt": "2026-09-19T10:00:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "agent"
+    },
+    {
+      "externalId": "flt-ret",
+      "type": "flight",
+      "status": "researched",
+      "title": "Regreso",
+      "origin": "San Miguel",
+      "destination": "MEX",
+      "startAt": "2026-09-20T18:00:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "agent"
+    },
+    {
+      "externalId": "act-1",
+      "type": "activity",
+      "status": "researched",
+      "title": "Serenata plaza",
+      "destination": "San Miguel",
+      "verificationStatus": "estimated",
+      "sourceType": "agent"
+    },
+    {
+      "externalId": "act-2",
+      "type": "activity",
+      "status": "researched",
+      "title": "Serenata Plaza",
+      "destination": "San Miguel",
+      "verificationStatus": "estimated",
+      "sourceType": "agent"
+    },
+    {
+      "externalId": "lodge-1",
+      "type": "lodging",
+      "status": "researched",
+      "title": "Hospedaje",
+      "destination": "San Miguel",
+      "verificationStatus": "estimated",
+      "sourceType": "agent"
+    }
+  ],
+  "itineraryItems": [
+    {
+      "externalId": "itin-1",
+      "title": "Serenata plaza",
+      "importance": "crucial"
+    }
+  ],
+  "checklistItems": [],
+  "notes": []
+}

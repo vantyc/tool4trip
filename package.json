@@ -9,7 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "validate": "tsx scripts/validate-resolution.ts",
-    "test:unit": "tsx --test src/application/*.test.ts"
+    "test:unit": "tsx --test src/application/*.test.ts src/application/tripPanel/*.test.ts"
   },
   "dependencies": {
     "dexie": "^4.2.1",
