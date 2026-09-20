@@ -885,4 +885,187 @@ describe('prepareMutationPlan / canonical preview', () => {
     assert.ok(outboundSnap.includes(outTitle))
     assert.ok(transferSnap.includes(transferTitle))
   })
+
+  it('REAL-SHAPE: grounded lodge without clocks → rebind endAt + 6 noches', () => {
+    // Exact lodge shape from job 9ad9861d… after event-date grounding stripped
+    // startAt/endAt (warning: horario concreto sin provenance eliminado).
+    const am217Url =
+      'https://aerodatabox.com/?origin=GDL&destination=MEX&date=2026-10-01&flight=AM217'
+    const current: TravelOption[] = [
+      opt('outbound-flight-25sep', {
+        type: 'flight',
+        title: outTitle,
+        origin: 'MEX',
+        destination: 'GDL',
+        startAt: '2026-09-25T11:15:00-06:00',
+        endAt: '2026-09-25T12:52:00-06:00',
+        sourceType: 'flight_schedule',
+        sourceUrl: am222Url,
+        provider: 'Aeromexico',
+        notes: cleanNotes,
+        checkedAt: '2026-09-20T06:05:57+00:00',
+      }),
+      opt('return-flight-28sep', {
+        type: 'flight',
+        title: retTitle,
+        origin: 'GDL',
+        destination: 'MEX',
+        startAt: '2026-09-28T08:22:00-06:00',
+        endAt: '2026-09-28T09:45:00-06:00',
+        sourceType: 'flight_schedule',
+        sourceUrl: y4141Url,
+        provider: 'Volaris',
+        notes: cleanNotes,
+      }),
+      opt('lodge-skeleton-1', {
+        type: 'lodging',
+        title: lodgeTitle,
+        notes: lodgeNotes,
+        startAt: '2026-09-25T15:00:00-06:00',
+        endAt: '2026-09-28T12:00:00-06:00',
+        status: 'researched',
+      }),
+      opt('ground-transfer-1', {
+        type: 'transfer',
+        title: transferTitle,
+        origin: 'GDL',
+        destination: 'San Miguel el Alto',
+        status: 'researched',
+      }),
+    ]
+
+    const raw: TripPackageV1 = {
+      schemaVersion: 1,
+      packageId: PKG_ID,
+      revision: 4,
+      trip: {
+        id: TRIP_ID,
+        title: 'Viaje a San Miguel el Alto para serenata 2026',
+        destination: 'San Miguel el Alto, Jalisco',
+        startDate: '2026-09-25',
+        endDate: '2026-10-01',
+        timezone: 'America/Mexico_City',
+        goals: [],
+        status: 'planned',
+      },
+      travelOptions: [
+        {
+          externalId: 'ground-transfer-1',
+          type: 'transfer',
+          status: 'researched',
+          title: 'Opción investigada',
+          sourceType: 'agent',
+        },
+        {
+          // Exact post-grounding lodge: NO startAt/endAt, C0 in title, date hint in notes
+          externalId: 'lodge-skeleton-1',
+          type: 'lodging',
+          status: 'researched',
+          title:
+            'Hospedaje San Miguel el Alto, Jalisco (estimado \u00021 6 noche(s))',
+          destination: 'San Miguel el Alto, Jalisco',
+          verificationStatus: 'estimated',
+          sourceType: 'agent',
+          notes: 'Fecha asociada (sin hora verificada): 2026-09-25',
+        },
+        {
+          externalId: 'outbound-flight-25sep',
+          type: 'flight',
+          status: 'shortlisted',
+          title: 'Opción investigada',
+          sourceType: 'agent',
+        },
+        {
+          externalId: 'return-flight-1oct',
+          type: 'flight',
+          status: 'shortlisted',
+          title: 'Opción investigada',
+          origin: 'GDL',
+          destination: 'MEX',
+          startAt: '2026-10-01T10:35:00-06:00',
+          endAt: '2026-10-01T12:10:00-06:00',
+          sourceType: 'flight_schedule',
+          sourceUrl: am217Url,
+          provider: 'Aeromexico',
+          checkedAt: '2026-09-20T08:24:26+00:00',
+        },
+      ],
+      itineraryItems: [],
+      checklistItems: [],
+      notes: [],
+    }
+
+    const prepared = prepareMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: {
+        ...(WINDOW as Trip),
+        title: 'Viaje a San Miguel el Alto para serenata 2026',
+      },
+      currentOptions: current,
+      rawPackage: raw,
+      llmOps: [
+        {
+          op: 'update',
+          entityKind: 'travelOption',
+          externalId: 'lodge-skeleton-1',
+          note: 'Extensión del hospedaje para cubrir nuevas fechas',
+        },
+      ],
+    })
+    assert.equal(prepared.status, 'ok')
+
+    const lodge = prepared.normalizedPackage.travelOptions.find(
+      (o) => o.externalId === 'lodge-skeleton-1',
+    )!
+    assert.equal(lodge.startAt, '2026-09-25T15:00:00-06:00')
+    assert.equal(lodge.endAt, '2026-10-01T12:00:00-06:00')
+    assert.match(lodge.title, /6 noche\(s\)/)
+    assert.equal(containsDisallowedControl(lodge.title), false)
+
+    const lodgeDiff = prepared.diff.find(
+      (d) => d.kind === 'update' && d.externalId === 'lodge-skeleton-1',
+    )
+    assert.ok(lodgeDiff, 'canonical diff must UPDATE lodge-skeleton-1')
+    assert.ok(
+      lodgeDiff!.fields?.some(
+        (f) =>
+          f.field === 'endAt' &&
+          String(f.before).startsWith('2026-09-28') &&
+          String(f.after).startsWith('2026-10-01'),
+      ),
+    )
+    assert.ok(
+      lodgeDiff!.fields?.some(
+        (f) =>
+          f.field === 'title' &&
+          String(f.before).includes('3 noche(s)') &&
+          String(f.after).includes('6 noche(s)'),
+      ),
+    )
+
+    // Flight replacement still correct (not regressed)
+    assert.ok(
+      prepared.canonicalOps.some(
+        (o) =>
+          o.op === 'supersede' &&
+          o.externalId === 'return-flight-1oct' &&
+          o.supersedesExternalId === 'return-flight-28sep',
+      ),
+    )
+    assert.ok(
+      prepared.diff.some(
+        (d) => d.kind === 'remove' && d.externalId === 'return-flight-28sep',
+      ),
+    )
+    assert.ok(
+      prepared.diff.some(
+        (d) => d.kind === 'add' && d.externalId === 'return-flight-1oct',
+      ),
+    )
+    const ret = prepared.normalizedPackage.travelOptions.find(
+      (o) => o.externalId === 'return-flight-1oct',
+    )!
+    assert.match(ret.title, /AM217/)
+    assert.equal(ret.title.includes('Opción investigada'), false)
+  })
 })

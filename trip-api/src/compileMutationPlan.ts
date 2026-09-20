@@ -452,6 +452,20 @@ export function buildFlightScheduleTitle(o: {
   return `${carrier} ${flight} ${ori} → ${dest}${dayPart} · ${time}`
 }
 
+/**
+ * Keep the local time / offset suffix of an ISO timestamp, replace the YMD.
+ * Example: 2026-09-28T12:00:00-06:00 + 2026-10-01 → 2026-10-01T12:00:00-06:00
+ */
+export function rebindIsoDateKeepingTime(
+  iso: string | undefined,
+  ymd: string,
+): string | undefined {
+  if (!iso || !ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return undefined
+  const m = iso.match(/T.+/)
+  if (!m) return undefined
+  return `${ymd}${m[0]}`
+}
+
 /** Calendar nights between start/end date prefixes (check-out − check-in). */
 export function lodgingNightsBetween(
   startAt: string | undefined,
@@ -499,6 +513,12 @@ export type MergePreserveOpts = {
    * authority to overwrite owned text fields on an existing entity.
    */
   changedFields?: readonly string[]
+  /**
+   * Proposed trip window after a date shift. When lodging clocks were stripped
+   * by agent grounding (no verified+sourceUrl), rebind current check-in/out
+   * times onto these dates so the stay covers the new trip.
+   */
+  targetTripWindow?: { startDate: string; endDate: string }
 }
 
 function fieldExplicitlyChanged(
@@ -651,10 +671,36 @@ export function mergePreservedPackageOption(
   const entityType =
     proposed.type || (current.type as PackageTravelOption['type'])
 
+  // Lodging date-shift: agent grounding strips startAt/endAt without
+  // verified+sourceUrl. Rebind current check-in/out times onto the new trip
+  // window so the stay covers trip.endDate.
+  let effectiveProposed = proposed
+  if (
+    entityType === 'lodging' &&
+    allowTemporal &&
+    opts?.targetTripWindow &&
+    (!proposed.startAt || !proposed.endAt)
+  ) {
+    const reboundStart =
+      proposed.startAt ??
+      rebindIsoDateKeepingTime(
+        current.startAt,
+        opts.targetTripWindow.startDate,
+      )
+    const reboundEnd =
+      proposed.endAt ??
+      rebindIsoDateKeepingTime(current.endAt, opts.targetTripWindow.endDate)
+    effectiveProposed = {
+      ...proposed,
+      ...(reboundStart ? { startAt: reboundStart } : {}),
+      ...(reboundEnd ? { endAt: reboundEnd } : {}),
+    }
+  }
+
   const curStart = datePrefix(current.startAt)
-  const propStart = datePrefix(proposed.startAt)
+  const propStart = datePrefix(effectiveProposed.startAt)
   const curEnd = datePrefix(current.endAt)
-  const propEnd = datePrefix(proposed.endAt)
+  const propEnd = datePrefix(effectiveProposed.endAt)
 
   const explicitTemporal =
     allowTemporal ||
@@ -711,11 +757,11 @@ export function mergePreservedPackageOption(
   }
 
   const startAt = explicitTemporal
-    ? proposed.startAt ?? current.startAt
-    : current.startAt ?? proposed.startAt
+    ? effectiveProposed.startAt ?? current.startAt
+    : current.startAt ?? effectiveProposed.startAt
   const endAt = explicitTemporal
-    ? proposed.endAt ?? current.endAt
-    : current.endAt ?? proposed.endAt
+    ? effectiveProposed.endAt ?? current.endAt
+    : current.endAt ?? effectiveProposed.endAt
 
   const curSrcRank = WEAK_SOURCE[current.sourceType ?? ''] ?? 0
   const propSrcRank = WEAK_SOURCE[proposed.sourceType ?? ''] ?? 0
@@ -1582,6 +1628,9 @@ export function compileMutationPlan(args: {
       pushPkgOpt(
         mergePreservedPackageOption(cur, fromProp, {
           allowTemporalReplace: !preserveTemporalIds.has(id) && shift,
+          targetTripWindow: shift
+            ? { startDate: window.startDate, endDate: window.endDate }
+            : undefined,
           // Ask Travel package apply has no per-field mask today; preserve-by-default.
         }),
       )
