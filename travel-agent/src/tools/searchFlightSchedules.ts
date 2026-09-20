@@ -52,11 +52,23 @@ export async function searchFlightSchedules(
     { signal: opts.signal },
   )
 
-  const sources = result.flights.map((f) => ({
-    url: f.sourceUrl,
-    title: `${f.carrierCode ?? ''} ${f.flightNumber ?? ''} ${f.origin}→${f.destination}`.trim(),
-    snippet: `dep ${f.departureAt}${f.arrivalAt ? ` arr ${f.arrivalAt}` : ''} · published schedule only`,
-  }))
+  const sources = result.flights.map((f) => {
+    const depClock = f.departureAt.match(/T(\d{2}:\d{2})/)?.[1]
+    const arrClock = f.arrivalAt?.match(/T(\d{2}:\d{2})/)?.[1]
+    const humanClocks = [
+      depClock ? `salida ${depClock}` : null,
+      arrClock ? `llegada ${arrClock}` : null,
+    ]
+      .filter(Boolean)
+      .join(', ')
+    return {
+      url: f.sourceUrl,
+      title: `${f.carrierCode ?? ''} ${f.flightNumber ?? ''} ${f.origin}→${f.destination}`.trim(),
+      // Keep ISO for machine use; add human clocks so natural-language claims
+      // can satisfy number coverage without changing webSearch/fetchUrl logic.
+      snippet: `vuelo ${f.flightNumber ?? ''} ${f.origin}→${f.destination} · dep ${f.departureAt}${f.arrivalAt ? ` arr ${f.arrivalAt}` : ''}${humanClocks ? ` (${humanClocks})` : ''} · date ${date} · published schedule only`,
+    }
+  })
 
   const trace: ToolTraceEntry = {
     tool: 'searchFlightSchedules',

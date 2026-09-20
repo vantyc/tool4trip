@@ -231,9 +231,40 @@ export function augmentContextWithProvenFlightSchedules(
   }
 
   if (!extras.length) return context
+
+  // Ask Travel date updates often reuse Dexie externalIds (outbound-flight-1).
+  // Prefer schedule-backed package rows over obsolete Dexie clocks for grounding.
+  const byExternal = new Map<string, Rec>()
+  for (const e of extras) {
+    const ext = str(e.externalId)
+    if (ext) byExternal.set(ext, e)
+  }
+  const existing = [...(context.travelOptions ?? [])] as Rec[]
+  const replacedExt = new Set<string>()
+  const merged: Rec[] = existing.map((row) => {
+    const ext = str(asRec(row).externalId)
+    const repl = ext ? byExternal.get(ext) : undefined
+    if (repl) {
+      replacedExt.add(ext)
+      return repl
+    }
+    return row
+  })
+  for (const e of extras) {
+    const ext = str(e.externalId)
+    if (ext && replacedExt.has(ext)) continue
+    // Avoid duplicating the same id/externalId already present after replace
+    const id = str(e.id)
+    const already = merged.some((row) => {
+      const r = asRec(row)
+      return (id && str(r.id) === id) || (ext && str(r.externalId) === ext)
+    })
+    if (!already) merged.push(e)
+  }
+
   return {
     ...context,
-    travelOptions: [...(context.travelOptions ?? []), ...extras],
+    travelOptions: merged,
   }
 }
 

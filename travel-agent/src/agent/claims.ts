@@ -170,6 +170,148 @@ export function normalizeEvidenceText(s: string): string {
     .trim()
 }
 
+const MONTHS_ES = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
+] as const
+
+const MONTHS_EN = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+] as const
+
+function parseIsoDateParts(value: string): {
+  y: string
+  m: string
+  d: string
+  hh?: string
+  mm?: string
+} | null {
+  const dateOnly = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (dateOnly) {
+    return { y: dateOnly[1]!, m: dateOnly[2]!, d: dateOnly[3]! }
+  }
+  const dt = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?/)
+  if (dt) {
+    return {
+      y: dt[1]!,
+      m: dt[2]!,
+      d: dt[3]!,
+      hh: dt[4]!,
+      mm: dt[5]!,
+    }
+  }
+  return null
+}
+
+function statementMentionsCalendarDay(
+  normStmt: string,
+  y: string,
+  m: string,
+  d: string,
+): boolean {
+  const iso = `${y}-${m}-${d}`
+  if (normStmt.includes(iso)) return true
+  if (normStmt.includes(`${d}/${m}/${y}`) || normStmt.includes(`${d}-${m}-${y}`)) {
+    return true
+  }
+  const day = String(Number(d))
+  const monthIdx = Number(m) - 1
+  if (monthIdx < 0 || monthIdx > 11) return false
+  const es = MONTHS_ES[monthIdx]!
+  const en = MONTHS_EN[monthIdx]!
+  // "25 de septiembre de 2026" / "25 de septiembre 2026"
+  if (
+    new RegExp(
+      `\\b${day}\\s+de\\s+${es}(?:\\s+de)?\\s+${y}\\b`,
+    ).test(normStmt)
+  ) {
+    return true
+  }
+  // "septiembre 25, 2026" / "sep 25 2026" / "25 september 2026"
+  if (
+    new RegExp(`\\b${day}\\s+${en}\\s+${y}\\b`).test(normStmt) ||
+    new RegExp(`\\b${en}\\s+${day},?\\s+${y}\\b`).test(normStmt)
+  ) {
+    return true
+  }
+  // abbreviated Spanish "25 sep 2026"
+  const esAbbr = es.slice(0, 3)
+  if (new RegExp(`\\b${day}\\s+${esAbbr}\\.?\\s+${y}\\b`).test(normStmt)) {
+    return true
+  }
+  return false
+}
+
+function statementHasClock(normStmt: string, hh: string, mm: string): boolean {
+  const h = hh.padStart(2, '0')
+  const m = mm.padStart(2, '0')
+  const hNum = String(Number(h))
+  // 11:15 or 11.15 ; allow unpadded hour
+  return (
+    normStmt.includes(`${h}:${m}`) ||
+    normStmt.includes(`${h}.${m}`) ||
+    normStmt.includes(`${hNum}:${m}`) ||
+    normStmt.includes(`${hNum}.${m}`)
+  )
+}
+
+/**
+ * Context claim statements may paraphrase field values (esp. ISO datetimes /
+ * dates as "25 de septiembre … 11:15"). Still require the statement to refer to
+ * the same calendar day (and clock when the field has one) — contradictions fail.
+ */
+export function statementIncludesContextValue(
+  statement: string,
+  fieldValue: string,
+): boolean {
+  const normStmt = normalizeEvidenceText(statement)
+  const normVal = normalizeEvidenceText(fieldValue)
+  if (!normVal) return true
+  if (normStmt.includes(normVal)) return true
+
+  const parts = parseIsoDateParts(fieldValue.trim())
+  if (parts) {
+    const dayOk = statementMentionsCalendarDay(
+      normStmt,
+      parts.y,
+      parts.m,
+      parts.d,
+    )
+    if (!dayOk) return false
+    if (parts.hh != null && parts.mm != null) {
+      return statementHasClock(normStmt, parts.hh, parts.mm)
+    }
+    return true
+  }
+
+  // Legacy short-prefix for non-ISO tokens (ids, titles, codes)
+  if (normVal.length >= 10 && normStmt.includes(normVal.slice(0, 10))) return true
+  return false
+}
+
 /** Flatten toolTrace sources that match url (order preserved). */
 export function listSourcesForUrl(
   toolTrace: ToolTraceEntry[],
@@ -545,9 +687,15 @@ export function validateClaimsAgainstToolTrace(
 
   llmClaims.forEach((llmClaim, index) => {
     const sourceType = llmClaim.sourceType ?? 'web'
+    const hasContextKeys =
+      Boolean(llmClaim.entityType) && Boolean(llmClaim.field)
 
-    if (sourceType === 'context') {
-      if (!context) {
+    // Context path (explicit), or web claim that also cites a resolvable
+    // context field whose value the statement actually refers to. Lets
+    // schedule-backed options ground natural Spanish without requiring the
+    // LLM to pick sourceType=context — without accepting contradictions.
+    if (sourceType === 'context' || (sourceType === 'web' && hasContextKeys && context)) {
+      if (sourceType === 'context' && !context) {
         invalid.push({
           index,
           claim: llmClaim,
@@ -556,44 +704,55 @@ export function validateClaimsAgainstToolTrace(
         })
         return
       }
-      const resolved = resolveContextField(
-        context,
-        llmClaim.entityType!,
-        llmClaim.entityId,
-        llmClaim.field!,
-      )
-      if (!resolved.ok) {
+      if (context && hasContextKeys) {
+        const resolved = resolveContextField(
+          context,
+          llmClaim.entityType!,
+          llmClaim.entityId,
+          llmClaim.field!,
+        )
+        if (resolved.ok) {
+          const claim: AgentClaimDraft = {
+            ...llmClaim,
+            sourceType: 'context',
+            sourceUrl: null,
+            evidenceIndex: 0,
+            sourceTitle: resolved.title,
+            quotedFact: resolved.value.slice(0, 800),
+          }
+          if (statementIncludesContextValue(claim.statement, claim.quotedFact)) {
+            valid.push(claim)
+            return
+          }
+          if (sourceType === 'context') {
+            invalid.push({
+              index,
+              claim,
+              code: 'context_statement_mismatch',
+              message: 'statement does not include context field value',
+            })
+            return
+          }
+          // web + entity cite that contradicts context → try web evidence instead
+        } else if (sourceType === 'context') {
+          invalid.push({
+            index,
+            claim: llmClaim,
+            code: resolved.code,
+            message: resolved.message,
+          })
+          return
+        }
+        // web + missing entity → fall through to web provenance
+      } else if (sourceType === 'context') {
         invalid.push({
           index,
           claim: llmClaim,
-          code: resolved.code,
-          message: resolved.message,
+          code: 'context_entity_missing',
+          message: 'context claim missing entityType/field',
         })
         return
       }
-      const claim: AgentClaimDraft = {
-        ...llmClaim,
-        sourceType: 'context',
-        sourceUrl: null,
-        evidenceIndex: 0,
-        sourceTitle: resolved.title,
-        quotedFact: resolved.value.slice(0, 800),
-      }
-      // Context facts: statement should mention the field value (normalized containment)
-      const normStmt = normalizeEvidenceText(claim.statement)
-      const normVal = normalizeEvidenceText(claim.quotedFact)
-      if (normVal && !normStmt.includes(normVal) && !normStmt.includes(normVal.slice(0, 10))) {
-        // allow pretty-printed dates: if quotedFact is YYYY-MM-DD, also accept if statement has it
-        invalid.push({
-          index,
-          claim,
-          code: 'context_statement_mismatch',
-          message: 'statement does not include context field value',
-        })
-        return
-      }
-      valid.push(claim)
-      return
     }
 
     // --- web provenance ---
@@ -792,6 +951,45 @@ export function extractOperationalSignals(
   return signals
 }
 
+const MODE_EQUIV_GROUPS: readonly (readonly string[])[] = [
+  ['vuelo', 'vuelos', 'flight', 'flights'],
+  ['autobus', 'autobús', 'bus'],
+  ['tren', 'train'],
+  ['transfer', 'traslado'],
+]
+
+function modesEquivalent(a: string, b: string): boolean {
+  const na = normalizeEvidenceText(a)
+  const nb = normalizeEvidenceText(b)
+  if (na === nb) return true
+  return MODE_EQUIV_GROUPS.some((g) => g.includes(na) && g.includes(nb))
+}
+
+const STATUS_EQUIV_GROUPS: readonly (readonly string[])[] = [
+  [
+    'confirmado',
+    'confirmada',
+    'confirmados',
+    'confirmadas',
+  ],
+  [
+    'suspendido',
+    'suspendida',
+    'suspendidos',
+    'suspendidas',
+    'suspensión',
+    'suspension',
+  ],
+  ['cancelado', 'cancelada', 'cancelados', 'canceladas'],
+]
+
+function statusEquivalent(a: string, b: string): boolean {
+  const na = normalizeEvidenceText(a)
+  const nb = normalizeEvidenceText(b)
+  if (na === nb) return true
+  return STATUS_EQUIV_GROUPS.some((g) => g.includes(na) && g.includes(nb))
+}
+
 function claimCoversSignal(
   claim: AgentClaimDraft,
   signal: OperationalSignal,
@@ -799,14 +997,12 @@ function claimCoversSignal(
   const stmt = `${claim.statement} ${claim.quotedFact}`
   if (signal.kind === 'transport_mode') {
     const modes = extractTransportModes(stmt)
-    return signal.modes.every((m) =>
-      modes.some((cm) => normalizeEvidenceText(cm) === normalizeEvidenceText(m)),
-    )
+    return signal.modes.every((m) => modes.some((cm) => modesEquivalent(cm, m)))
   }
   if (signal.kind === 'service_status') {
     const st = extractStatusWords(stmt)
     return signal.statusWords.every((m) =>
-      st.some((cm) => normalizeEvidenceText(cm) === normalizeEvidenceText(m)),
+      st.some((cm) => statusEquivalent(cm, m)),
     )
   }
   if (signal.kind === 'price' || signal.kind === 'currency') {
@@ -840,9 +1036,34 @@ function claimCoversSignal(
 
 function collectPackageTexts(pkg: unknown): { where: string; text: string }[] {
   const out: { where: string; text: string }[] = []
+  // Identifiers / enums / URLs are not narrative operational assertions
+  // (e.g. externalId "outbound-flight-1" must not flag transport_mode:flight).
+  const SKIP_KEYS = new Set([
+    'id',
+    'externalId',
+    'tripId',
+    'packageId',
+    'sourceUrl',
+    'sourceType',
+    'type',
+    'status',
+    'verificationStatus',
+    'checkedAt',
+    'startAt',
+    'endAt',
+    'startDate',
+    'endDate',
+    'dueAt',
+    'generatedAt',
+    'timezone',
+    'origin',
+    'destination',
+    'schemaVersion',
+  ])
   const p = pkg && typeof pkg === 'object' ? (pkg as Record<string, unknown>) : {}
   const addObj = (prefix: string, o: Record<string, unknown>) => {
     for (const [k, v] of Object.entries(o)) {
+      if (SKIP_KEYS.has(k)) continue
       if (typeof v === 'string' && v.trim()) out.push({ where: `${prefix}.${k}`, text: v })
       if (typeof v === 'number' && Number.isFinite(v)) {
         out.push({ where: `${prefix}.${k}`, text: String(v) })
@@ -1004,6 +1225,22 @@ export function applyClaimsSourceOfTruth(
     draft.package && typeof draft.package === 'object'
       ? ({ ...(draft.package as Record<string, unknown>) } as Record<string, unknown>)
       : {}
+  if (pkg.trip && typeof pkg.trip === 'object') {
+    const trip = { ...(pkg.trip as Record<string, unknown>) }
+    for (const k of ['notes', 'title', 'goals'] as const) {
+      if (typeof trip[k] === 'string') {
+        trip[k] = scrubOperationalFreeText(trip[k] as string) || undefined
+      }
+      if (Array.isArray(trip[k])) {
+        trip[k] = (trip[k] as unknown[])
+          .map((g) =>
+            typeof g === 'string' ? scrubOperationalFreeText(g) || undefined : g,
+          )
+          .filter((g) => g != null && g !== '')
+      }
+    }
+    pkg.trip = trip
+  }
   const options = Array.isArray(pkg.travelOptions)
     ? pkg.travelOptions.map((o) =>
         o && typeof o === 'object' ? { ...(o as Record<string, unknown>) } : o,

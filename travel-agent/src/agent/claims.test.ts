@@ -10,6 +10,7 @@ import {
   resolveClaimEvidence,
   scrubOperationalFreeText,
   scrubUngroundedConcreteFields,
+  statementIncludesContextValue,
   validateClaimsAgainstToolTrace,
   type AgentClaimLlm,
 } from './claims.ts'
@@ -1164,6 +1165,413 @@ describe('Ask Travel searchFlightSchedules context grounding', () => {
     assert.ok(
       g.violations.some((v) => v.code === 'source_url_missing'),
       JSON.stringify(g.violations),
+    )
+  })
+
+  /**
+   * Production Ask Travel personalization (trip bd4d0e9a…): context_statement_mismatch
+   * after 57df5c6. LLM wrote natural Spanish clocks; Dexie/schedule startAt is ISO.
+   * Exact statements + values from live diagnosis 2026-09-20.
+   */
+  it('prod regression: natural Spanish startAt matches ISO schedule-backed value', () => {
+    // claim[0] statement (exact) vs matching schedule-backed startAt
+    const stmt0 =
+      'Vuelos directos MEX → GDL para el 25 de septiembre 2026 con salida entre 11:00 y 15:00, incluyendo vuelo AM222 con salida a las 11:15 y llegada a las 12:52.'
+    const matchingStart0 = '2026-09-25T11:15:00-06:00'
+    const obsoleteDexie0 = '2026-09-20T07:00:00-06:00'
+
+    assert.equal(
+      statementIncludesContextValue(stmt0, matchingStart0),
+      true,
+      'natural Spanish must ground matching ISO startAt',
+    )
+    assert.equal(
+      statementIncludesContextValue(stmt0, obsoleteDexie0),
+      false,
+      'must NOT ground against obsolete Dexie startAt (contradiction)',
+    )
+
+    // claim[1] statement (exact) vs matching / obsolete
+    const stmt1 =
+      'Vuelo directo GDL → MEX para el 28 de septiembre 2026, vuelo Y4149 con salida a las 06:02 y llegada a las 07:25.'
+    const matchingStart1 = '2026-09-28T06:02:00-06:00'
+    const obsoleteDexie1 = '2026-09-22T12:00:00-06:00'
+
+    assert.equal(statementIncludesContextValue(stmt1, matchingStart1), true)
+    assert.equal(statementIncludesContextValue(stmt1, obsoleteDexie1), false)
+
+    // Wrong clock same day still fails
+    assert.equal(
+      statementIncludesContextValue(
+        'Vuelo MEX→GDL el 25 de septiembre 2026 con salida a las 14:00',
+        matchingStart0,
+      ),
+      false,
+    )
+  })
+
+  it('prod regression: context_statement_mismatch path via validateClaimsAgainstToolTrace', () => {
+    const am222Url =
+      'https://aerodatabox.com/?origin=MEX&destination=GDL&date=2026-09-25&flight=AM222'
+    const y4149Url =
+      'https://aerodatabox.com/?origin=GDL&destination=MEX&date=2026-09-28&flight=Y4149'
+    const checked = '2026-09-20T00:55:20+00:00'
+
+    const ctx: AgentAskRequest['context'] = {
+      ...emptyAskContext(),
+      travelOptions: [
+        {
+          id: 'opt-bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28-outbound-flight-1',
+          tripId: 'bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28',
+          type: 'flight',
+          status: 'researched',
+          title: 'Vuelo estimado directo MEX → GDL el domingo 20 de septiembre 2026',
+          provider: 'Aeromexico',
+          origin: 'MEX',
+          destination: 'GDL',
+          startAt: '2026-09-20T07:00:00-06:00',
+          endAt: '2026-09-20T08:20:00-06:00',
+          externalId: 'outbound-flight-1',
+          verificationStatus: 'estimated',
+          sourceType: 'agent',
+        },
+        {
+          id: 'opt-bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28-return-flight-1',
+          tripId: 'bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28',
+          type: 'flight',
+          status: 'researched',
+          title: 'Vuelo estimado directo GDL → MEX el martes 22 de septiembre 2026',
+          provider: 'Volaris',
+          origin: 'GDL',
+          destination: 'MEX',
+          startAt: '2026-09-22T12:00:00-06:00',
+          endAt: '2026-09-22T13:25:00-06:00',
+          externalId: 'return-flight-1',
+          verificationStatus: 'estimated',
+          sourceType: 'agent',
+        },
+      ],
+    }
+
+    const claim0: AgentClaimLlm = {
+      kind: 'schedule',
+      statement:
+        'Vuelos directos MEX → GDL para el 25 de septiembre 2026 con salida entre 11:00 y 15:00, incluyendo vuelo AM222 con salida a las 11:15 y llegada a las 12:52.',
+      sourceType: 'context',
+      entityType: 'travelOption',
+      entityId: 'opt-bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28-outbound-flight-1',
+      field: 'startAt',
+      verificationStatus: 'estimated',
+      confidence: 'high',
+    }
+    const claim1: AgentClaimLlm = {
+      kind: 'schedule',
+      statement:
+        'Vuelo directo GDL → MEX para el 28 de septiembre 2026, vuelo Y4149 con salida a las 06:02 y llegada a las 07:25.',
+      sourceType: 'context',
+      entityType: 'travelOption',
+      entityId: 'opt-bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28-return-flight-1',
+      field: 'startAt',
+      verificationStatus: 'estimated',
+      confidence: 'high',
+    }
+
+    // Exact production failure mode: Dexie entities + natural statements → mismatch
+    // (contradiction: statement describes Sep 25/28 clocks, Dexie has Sep 20/22)
+    const againstDexie = validateClaimsAgainstToolTrace(
+      [claim0, claim1],
+      [],
+      ctx,
+    )
+    assert.equal(againstDexie.valid.length, 0)
+    assert.equal(againstDexie.invalid.length, 2)
+    assert.ok(
+      againstDexie.invalid.every((v) => v.code === 'context_statement_mismatch'),
+      JSON.stringify(againstDexie.invalid),
+    )
+
+    // Same natural statements against schedule-backed matching startAt → pass
+    const scheduleBackedCtx: AgentAskRequest['context'] = {
+      ...emptyAskContext(),
+      travelOptions: [
+        {
+          id: 'outbound-flight-am222',
+          tripId: 'bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28',
+          type: 'flight',
+          status: 'researched',
+          title: 'AM222 MEX→GDL 11:15',
+          provider: 'Aeromexico',
+          origin: 'MEX',
+          destination: 'GDL',
+          startAt: '2026-09-25T11:15:00-06:00',
+          endAt: '2026-09-25T12:52:00-06:00',
+          externalId: 'outbound-flight-am222',
+          verificationStatus: 'estimated',
+          sourceType: 'flight_schedule',
+          sourceUrl: am222Url,
+          notes: 'HORARIO PUBLICADO — no confirma asientos ni tarifa.',
+        },
+        {
+          id: 'return-flight-y4149',
+          tripId: 'bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28',
+          type: 'flight',
+          status: 'researched',
+          title: 'Y4149 GDL→MEX 06:02',
+          provider: 'Volaris',
+          origin: 'GDL',
+          destination: 'MEX',
+          startAt: '2026-09-28T06:02:00-06:00',
+          endAt: '2026-09-28T07:25:00-06:00',
+          externalId: 'return-flight-y4149',
+          verificationStatus: 'estimated',
+          sourceType: 'flight_schedule',
+          sourceUrl: y4149Url,
+          notes: 'HORARIO PUBLICADO — no confirma asientos ni tarifa.',
+        },
+      ],
+    }
+    const againstSchedule = validateClaimsAgainstToolTrace(
+      [
+        { ...claim0, entityId: 'outbound-flight-am222' },
+        { ...claim1, entityId: 'return-flight-y4149' },
+      ],
+      [
+        {
+          tool: 'searchFlightSchedules',
+          ok: true,
+          checkedAt: checked,
+          args: { origin: 'MEX', destination: 'GDL', date: '2026-09-25' },
+          sources: [
+            {
+              url: am222Url,
+              title: 'AM AM222 MEX→GDL',
+              snippet:
+                'dep 2026-09-25T11:15:00-06:00 arr 2026-09-25T12:52:00-06:00 (salida 11:15, llegada 12:52) · date 2026-09-25 · published schedule only',
+            },
+          ],
+        },
+      ],
+      scheduleBackedCtx,
+    )
+    assert.equal(againstSchedule.invalid.length, 0, JSON.stringify(againstSchedule.invalid))
+    assert.equal(againstSchedule.valid.length, 2)
+
+    // Fabricated entity still fails
+    const fabricated = validateClaimsAgainstToolTrace(
+      [
+        {
+          ...claim0,
+          entityId: 'outbound-flight-does-not-exist',
+        },
+      ],
+      [],
+      scheduleBackedCtx,
+    )
+    assert.equal(fabricated.valid.length, 0)
+    assert.equal(fabricated.invalid[0]?.code, 'context_entity_missing')
+
+    // LLM often labels schedule claims as sourceType=web while citing the
+    // schedule-backed package entityId — accept via context when statement matches.
+    const webLabeled = validateClaimsAgainstToolTrace(
+      [
+        {
+          ...claim0,
+          sourceType: 'web',
+          entityId: 'outbound-flight-am222',
+          sourceUrl: am222Url,
+          evidenceIndex: 0,
+        },
+        {
+          ...claim1,
+          sourceType: 'web',
+          entityId: 'return-flight-y4149',
+          sourceUrl: y4149Url,
+          evidenceIndex: 0,
+        },
+      ],
+      [
+        {
+          tool: 'searchFlightSchedules',
+          ok: true,
+          checkedAt: checked,
+          args: {},
+          sources: [
+            {
+              url: am222Url,
+              title: 'AM AM222',
+              snippet: 'dep 2026-09-25T11:15:00-06:00',
+            },
+          ],
+        },
+      ],
+      scheduleBackedCtx,
+    )
+    assert.equal(webLabeled.invalid.length, 0, JSON.stringify(webLabeled.invalid))
+    assert.equal(webLabeled.valid.length, 2)
+    assert.ok(webLabeled.valid.every((c) => c.sourceType === 'context'))
+
+    // web + obsolete Dexie entity (statement contradicts startAt) must NOT
+    // silently pass context; falls through — and still fails if web evidence
+    // lacks required numbers/modes (snippet too thin here).
+    const webObsolete = validateClaimsAgainstToolTrace(
+      [
+        {
+          ...claim0,
+          sourceType: 'web',
+          sourceUrl: am222Url,
+          evidenceIndex: 0,
+        },
+      ],
+      [
+        {
+          tool: 'searchFlightSchedules',
+          ok: true,
+          checkedAt: checked,
+          args: {},
+          sources: [
+            {
+              url: am222Url,
+              title: 'AM AM222',
+              snippet: 'dep 2026-09-25T11:15:00-06:00',
+            },
+          ],
+        },
+      ],
+      ctx,
+    )
+    assert.equal(webObsolete.valid.length, 0)
+    assert.ok(
+      webObsolete.invalid.some(
+        (v) =>
+          v.code === 'number_mismatch' ||
+          v.code === 'transport_mode_ungrounded',
+      ),
+      JSON.stringify(webObsolete.invalid),
+    )
+
+    // When Dexie still has outbound-flight-1 with obsolete clocks, but package
+    // reuses that externalId with schedule-backed Sep 25 clocks, grounding must
+    // prefer the schedule value (Ask Travel date update).
+    const collidingCtx: AgentAskRequest['context'] = {
+      ...emptyAskContext(),
+      travelOptions: [
+        {
+          id: 'opt-bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28-outbound-flight-1',
+          tripId: 'bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28',
+          type: 'flight',
+          status: 'researched',
+          title: 'Old Dexie outbound',
+          provider: 'Aeromexico',
+          origin: 'MEX',
+          destination: 'GDL',
+          startAt: '2026-09-20T07:00:00-06:00',
+          endAt: '2026-09-20T08:20:00-06:00',
+          externalId: 'outbound-flight-1',
+          verificationStatus: 'estimated',
+          sourceType: 'agent',
+        },
+      ],
+    }
+    const collidingPkg = {
+      schemaVersion: 1,
+      packageId: 'agent-bd4d0e9a',
+      revision: 2,
+      trip: {
+        id: 'bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28',
+        title: 'SMA',
+        startDate: '2026-09-25',
+        endDate: '2026-09-28',
+        timezone: 'America/Mexico_City',
+        goals: [],
+        status: 'planned',
+      },
+      travelOptions: [
+        {
+          externalId: 'outbound-flight-1',
+          type: 'flight',
+          status: 'researched',
+          title: 'AM222 MEX→GDL 11:15',
+          provider: 'Aeromexico',
+          origin: 'MEX',
+          destination: 'GDL',
+          startAt: '2026-09-25T11:15:00-06:00',
+          endAt: '2026-09-25T12:52:00-06:00',
+          verificationStatus: 'estimated',
+          sourceType: 'flight_schedule',
+          sourceUrl: am222Url,
+          notes: 'HORARIO PUBLICADO',
+        },
+      ],
+      itineraryItems: [],
+      checklistItems: [],
+      notes: [],
+    }
+    const collidingTrace: ToolTraceEntry[] = [
+      {
+        tool: 'searchFlightSchedules',
+        ok: true,
+        checkedAt: checked,
+        args: {
+          origin: 'MEX',
+          destination: 'GDL',
+          date: '2026-09-25',
+          flights: [
+            {
+              origin: 'MEX',
+              destination: 'GDL',
+              departureAt: '2026-09-25T11:15:00-06:00',
+              arrivalAt: '2026-09-25T12:52:00-06:00',
+              carrierCode: 'AM',
+              flightNumber: 'AM222',
+              sourceUrl: am222Url,
+              checkedAt: checked,
+            },
+          ],
+        },
+        sources: [
+          {
+            url: am222Url,
+            title: 'AM AM222',
+            snippet:
+              'vuelo AM222 MEX→GDL · dep 2026-09-25T11:15:00-06:00 (salida 11:15)',
+          },
+        ],
+      },
+    ]
+    const collidingDraft = {
+      narrative: 'Actualización de fechas',
+      warnings: [],
+      diffSummary: [],
+      ops: [],
+      claims: [
+        {
+          kind: 'schedule',
+          statement:
+            'Vuelos directos MEX → GDL para el 25 de septiembre 2026 con salida entre 11:00 y 15:00, incluyendo vuelo AM222 con salida a las 11:15 y llegada a las 12:52.',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'outbound-flight-1',
+          field: 'startAt',
+          verificationStatus: 'estimated',
+          confidence: 'high',
+        },
+      ],
+      package: collidingPkg,
+    }
+    const gCollide = assertDraftGrounded(
+      collidingDraft,
+      collidingTrace,
+      collidingCtx,
+      {
+        allowSkeletonPackage: false,
+        userPrompt:
+          'Cambia las fechas del viaje al viernes 25 de septiembre de 2026. Busca vuelos directos MEX a GDL.',
+      },
+    )
+    assert.equal(
+      gCollide.ok,
+      true,
+      gCollide.ok ? '' : JSON.stringify(gCollide),
     )
   })
 })
