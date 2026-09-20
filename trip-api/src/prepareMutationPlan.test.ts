@@ -642,4 +642,247 @@ describe('prepareMutationPlan / canonical preview', () => {
     assert.equal(blob.includes('Hecho (schedule)'), false)
     assert.equal(blob.includes('updatedAt'), false)
   })
+
+  it('EXACT: extend to 1 oct — supersede remove+add, AM221 title, lodge nights', () => {
+    const am221Url =
+      'https://aerodatabox.com/?origin=GDL&destination=MEX&date=2026-10-01&flight=AM221'
+    const current: TravelOption[] = [
+      opt('outbound-flight-25sep', {
+        type: 'flight',
+        title: outTitle,
+        origin: 'MEX',
+        destination: 'GDL',
+        startAt: '2026-09-25T11:15:00-06:00',
+        endAt: '2026-09-25T12:52:00-06:00',
+        sourceType: 'flight_schedule',
+        sourceUrl: am222Url,
+        provider: 'Aeromexico',
+        notes: cleanNotes,
+        checkedAt: '2026-09-20T06:05:57+00:00',
+        verificationStatus: 'estimated',
+      }),
+      opt('return-flight-28sep', {
+        type: 'flight',
+        title: retTitle,
+        origin: 'GDL',
+        destination: 'MEX',
+        startAt: '2026-09-28T08:22:00-06:00',
+        endAt: '2026-09-28T09:45:00-06:00',
+        sourceType: 'flight_schedule',
+        sourceUrl: y4141Url,
+        provider: 'Volaris',
+        notes: cleanNotes,
+        checkedAt: '2026-09-20T06:05:58+00:00',
+      }),
+      opt('lodge-skeleton-1', {
+        type: 'lodging',
+        title: lodgeTitle,
+        notes: lodgeNotes,
+        startAt: '2026-09-25T15:00:00-06:00',
+        endAt: '2026-09-28T12:00:00-06:00',
+        status: 'researched',
+      }),
+      opt('ground-transfer-1', {
+        type: 'transfer',
+        title: transferTitle,
+        origin: 'GDL',
+        destination: 'San Miguel el Alto',
+        status: 'researched',
+      }),
+    ]
+    const outboundSnap = JSON.stringify(
+      current.find((o) => o.externalId === 'outbound-flight-25sep'),
+    )
+    const transferSnap = JSON.stringify(
+      current.find((o) => o.externalId === 'ground-transfer-1'),
+    )
+
+    const raw: TripPackageV1 = {
+      schemaVersion: 1,
+      packageId: PKG_ID,
+      revision: 4,
+      trip: {
+        id: TRIP_ID,
+        title: WINDOW.title,
+        destination: WINDOW.destination,
+        startDate: '2026-09-25',
+        endDate: '2026-10-01',
+        timezone: 'America/Mexico_City',
+        goals: [],
+        status: 'planned',
+      },
+      travelOptions: [
+        {
+          externalId: 'outbound-flight-25sep',
+          type: 'flight',
+          status: 'shortlisted',
+          title: 'Opción investigada',
+          origin: 'MEX',
+          destination: 'GDL',
+          startAt: '2026-09-25T11:15:00-06:00',
+          endAt: '2026-09-25T12:52:00-06:00',
+          sourceType: 'flight_schedule',
+          sourceUrl: am222Url,
+          provider: 'Aeromexico',
+          notes: cleanNotes,
+          checkedAt: '2026-09-20T06:05:57+00:00',
+        },
+        {
+          externalId: 'return-flight-01oct',
+          type: 'flight',
+          status: 'shortlisted',
+          title: 'Opción investigada',
+          origin: 'GDL',
+          destination: 'MEX',
+          startAt: '2026-10-01T11:38:00-06:00',
+          endAt: '2026-10-01T13:10:00-06:00',
+          sourceType: 'flight_schedule',
+          sourceUrl: am221Url,
+          provider: 'Aeromexico',
+          checkedAt: '2026-09-20T08:24:26+00:00',
+        },
+        {
+          externalId: 'lodge-skeleton-1',
+          type: 'lodging',
+          status: 'researched',
+          title:
+            'Hospedaje San Miguel el Alto, Jalisco (estimado \u00186 noche(s))',
+          notes: lodgeNotes,
+          startAt: '2026-09-25T15:00:00-06:00',
+          endAt: '2026-10-01T11:00:00-06:00',
+          sourceType: 'agent',
+        },
+        {
+          externalId: 'ground-transfer-1',
+          type: 'transfer',
+          status: 'researched',
+          title: 'Opción investigada',
+          origin: 'GDL',
+          destination: 'San Miguel el Alto',
+          sourceType: 'agent',
+          notes: 'Hecho (schedule):\u0015 contamination',
+        },
+      ],
+      itineraryItems: [],
+      checklistItems: [],
+      notes: [],
+    }
+
+    const prepared = prepareMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: WINDOW as Trip,
+      currentOptions: current,
+      rawPackage: raw,
+      llmOps: [],
+    })
+    assert.equal(prepared.status, 'ok')
+
+    const supersede = prepared.canonicalOps.find(
+      (o) =>
+        o.op === 'supersede' &&
+        o.externalId === 'return-flight-01oct' &&
+        o.supersedesExternalId === 'return-flight-28sep',
+    )
+    assert.ok(supersede, 'canonicalOps must supersede 28sep → 01oct')
+
+    const removeLine = prepared.diff.find(
+      (d) => d.kind === 'remove' && d.externalId === 'return-flight-28sep',
+    )
+    assert.ok(removeLine, 'diff must REMOVE return-flight-28sep')
+    assert.match(String(removeLine!.note ?? ''), /return-flight-01oct/)
+
+    const addLine = prepared.diff.find(
+      (d) => d.kind === 'add' && d.externalId === 'return-flight-01oct',
+    )
+    assert.ok(addLine, 'diff must ADD return-flight-01oct')
+
+    const tripLine = prepared.diff.find(
+      (d) => d.kind === 'update' && d.entityKind === 'trip',
+    )
+    assert.ok(
+      tripLine?.fields?.some(
+        (f) =>
+          f.field === 'endDate' &&
+          f.before === '2026-09-28' &&
+          f.after === '2026-10-01',
+      ),
+    )
+
+    const lodgeLine = prepared.diff.find(
+      (d) => d.kind === 'update' && d.externalId === 'lodge-skeleton-1',
+    )
+    assert.ok(lodgeLine, 'diff must UPDATE lodge')
+    assert.ok(
+      lodgeLine!.fields?.some(
+        (f) =>
+          f.field === 'endAt' &&
+          String(f.before).startsWith('2026-09-28') &&
+          String(f.after).startsWith('2026-10-01'),
+      ),
+      'lodge endAt 28sep → 1oct',
+    )
+    assert.ok(
+      lodgeLine!.fields?.some(
+        (f) =>
+          f.field === 'title' &&
+          String(f.before).includes('3 noche(s)') &&
+          String(f.after).includes('6 noche(s)'),
+      ),
+      'lodge title 3 → 6 noches',
+    )
+
+    const by = Object.fromEntries(
+      prepared.normalizedPackage.travelOptions.map((o) => [o.externalId, o]),
+    )
+    assert.equal(Object.keys(by).sort().join(','), [
+      'ground-transfer-1',
+      'lodge-skeleton-1',
+      'outbound-flight-25sep',
+      'return-flight-01oct',
+    ].join(','))
+    assert.equal(by['return-flight-28sep'], undefined)
+
+    const ret = by['return-flight-01oct']!
+    assert.equal(ret.title.includes('Opción investigada'), false)
+    assert.match(ret.title, /AM221/)
+    assert.match(ret.title, /GDL/)
+    assert.match(ret.title, /MEX/)
+    assert.match(ret.title, /11:38/)
+    assert.match(ret.title, /13:10/)
+    assert.equal(ret.sourceUrl, am221Url)
+
+    const lodge = by['lodge-skeleton-1']!
+    assert.equal(lodge.endAt?.startsWith('2026-10-01'), true)
+    assert.match(lodge.title, /6 noche\(s\)/)
+    assert.equal(containsDisallowedControl(lodge.title), false)
+    assert.equal(containsDisallowedControl(JSON.stringify(prepared.diff)), false)
+    assert.equal(
+      containsDisallowedControl(JSON.stringify(prepared.normalizedPackage)),
+      false,
+    )
+
+    const out = by['outbound-flight-25sep']!
+    assert.equal(out.title, outTitle)
+    assert.equal(out.sourceUrl, am222Url)
+    assert.equal(out.startAt, '2026-09-25T11:15:00-06:00')
+    assert.equal(out.endAt, '2026-09-25T12:52:00-06:00')
+
+    const xfer = by['ground-transfer-1']!
+    assert.equal(xfer.title, transferTitle)
+    assert.equal(xfer.notes, undefined)
+    assert.equal(containsDisallowedControl(xfer.title), false)
+
+    // Outbound / transfer: no false field churn vs CURRENT semantic identity
+    assert.equal(
+      prepared.diff.some((d) => d.externalId === 'outbound-flight-25sep'),
+      false,
+    )
+    assert.equal(
+      prepared.diff.some((d) => d.externalId === 'ground-transfer-1'),
+      false,
+    )
+    // Keep snapshots for readability of intent (CURRENT fixtures unchanged)
+    assert.ok(outboundSnap.includes(outTitle))
+    assert.ok(transferSnap.includes(transferTitle))
+  })
 })

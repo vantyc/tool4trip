@@ -12,6 +12,7 @@ import {
 import type { ImportUpdatePlan } from '../../application/packageImport'
 import type { Trip } from '../../domain/types'
 import { useOnline } from '../useOnline'
+import { safeDisplayText } from '../../../shared/displaySanitize'
 
 function optionPrimarySource(o: {
   sourceUrl?: string
@@ -239,7 +240,7 @@ export function AskTravelPage() {
       {proposal && (
         <div className="agent-proposal">
           <h2>Propuesta</h2>
-          <p>{proposal.narrative}</p>
+          <p>{safeDisplayText(proposal.narrative)}</p>
 
           {canonical?.status === 'review_required' && (
             <div className="status-bad">
@@ -251,7 +252,7 @@ export function AskTravelPage() {
                   ? canonical.conflicts
                   : ['Conflicto de mutación']
                 ).map((c) => (
-                  <li key={c}>{c}</li>
+                  <li key={c}>{safeDisplayText(c)}</li>
                 ))}
               </ul>
             </div>
@@ -260,7 +261,7 @@ export function AskTravelPage() {
           {(canonical?.warnings?.length ?? 0) > 0 && (
             <ul className="muted">
               {canonical!.warnings.map((w) => (
-                <li key={w}>{w}</li>
+                <li key={w}>{safeDisplayText(w)}</li>
               ))}
             </ul>
           )}
@@ -279,17 +280,17 @@ export function AskTravelPage() {
                 <tbody>
                   {canonical.diff.map((d, i) => (
                     <tr key={`${d.kind}-${d.externalId}-${i}`}>
-                      <td>{d.kind}</td>
-                      <td>{d.externalId}</td>
+                      <td>{safeDisplayText(d.kind)}</td>
+                      <td>{safeDisplayText(d.externalId)}</td>
                       <td>
                         {d.fields?.length
                           ? d.fields
                               .map(
                                 (f) =>
-                                  `${f.field}: ${String(f.before ?? '—')} → ${String(f.after ?? '—')}`,
+                                  `${safeDisplayText(f.field, '')}: ${safeDisplayText(f.before)} → ${safeDisplayText(f.after)}`,
                               )
                               .join('; ')
-                          : (d.note ?? '—')}
+                          : safeDisplayText(d.note)}
                       </td>
                     </tr>
                   ))}
@@ -306,28 +307,33 @@ export function AskTravelPage() {
                   const ext = String(o.externalId ?? '')
                   return (
                     <li key={ext}>
-                      <strong>{String(o.title ?? ext)}</strong>
-                      {o.startAt ? ` · ${String(o.startAt)}` : ''}
+                      <strong>{safeDisplayText(o.title ?? ext)}</strong>
+                      {o.startAt
+                        ? ` · ${safeDisplayText(o.startAt, '')}`
+                        : ''}
                       <br />
                       <span className="muted">
-                        {optionPrimarySource({
-                          sourceUrl:
-                            typeof o.sourceUrl === 'string'
-                              ? o.sourceUrl
-                              : undefined,
-                          provider:
-                            typeof o.provider === 'string'
-                              ? o.provider
-                              : undefined,
-                          checkedAt:
-                            typeof o.checkedAt === 'string'
-                              ? o.checkedAt
-                              : undefined,
-                          sourceType:
-                            typeof o.sourceType === 'string'
-                              ? o.sourceType
-                              : undefined,
-                        })}
+                        {safeDisplayText(
+                          optionPrimarySource({
+                            sourceUrl:
+                              typeof o.sourceUrl === 'string'
+                                ? o.sourceUrl
+                                : undefined,
+                            provider:
+                              typeof o.provider === 'string'
+                                ? o.provider
+                                : undefined,
+                            checkedAt:
+                              typeof o.checkedAt === 'string'
+                                ? o.checkedAt
+                                : undefined,
+                            sourceType:
+                              typeof o.sourceType === 'string'
+                                ? o.sourceType
+                                : undefined,
+                          }),
+                          'sin fuente estructurada',
+                        )}
                       </span>
                     </li>
                   )
@@ -349,7 +355,7 @@ export function AskTravelPage() {
             {proposal.warnings.length > 0 && (
               <ul className="muted">
                 {proposal.warnings.map((w) => (
-                  <li key={w}>{w}</li>
+                  <li key={w}>{safeDisplayText(w)}</li>
                 ))}
               </ul>
             )}
@@ -366,11 +372,11 @@ export function AskTravelPage() {
                   {proposal.diffSummary.map((d, i) => (
                     <tr key={`raw-${d.entityKind}-${i}`}>
                       <td>
-                        {d.entityRef ?? d.entityKind}
-                        {d.note ? ` — ${d.note}` : ''}
+                        {safeDisplayText(d.entityRef ?? d.entityKind)}
+                        {d.note ? ` — ${safeDisplayText(d.note, '')}` : ''}
                       </td>
-                      <td>{d.before ?? '—'}</td>
-                      <td>{d.after ?? '—'}</td>
+                      <td>{safeDisplayText(d.before)}</td>
+                      <td>{safeDisplayText(d.after)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -380,13 +386,14 @@ export function AskTravelPage() {
               <ul>
                 {proposal.toolTrace.map((t, i) => (
                   <li key={`${t.tool}-${i}`}>
-                    {t.tool}: {t.ok ? 'ok' : t.error ?? 'fail'}
+                    {safeDisplayText(t.tool)}:{' '}
+                    {t.ok ? 'ok' : safeDisplayText(t.error ?? 'fail')}
                     {t.sources && t.sources.length > 0 && (
                       <ul>
                         {t.sources.map((s, j) => (
                           <li key={`${i}-${j}`}>
-                            {s.title ?? 'source'}
-                            {s.url ? ` — ${s.url}` : ''}
+                            {safeDisplayText(s.title ?? 'source')}
+                            {s.url ? ` — ${safeDisplayText(s.url, '')}` : ''}
                           </li>
                         ))}
                       </ul>

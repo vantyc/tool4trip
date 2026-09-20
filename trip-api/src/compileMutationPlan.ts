@@ -1,5 +1,8 @@
 import type { AgentOpRecord } from '../../shared/agentContracts.ts'
-import { extractIataCode } from './airportArrivalPolicy.ts'
+import {
+  extractIataCode,
+  formatClockEs,
+} from './airportArrivalPolicy.ts'
 import {
   isProtectedTravelOption,
   PackageMutationConflictError,
@@ -379,12 +382,104 @@ function datesShifted(
 const PLACEHOLDER_TITLE =
   /^(opci[oó]n investigada|opcion investigada|tbd|n\/?a|pending|sin t[ií]tulo|untitled|placeholder)$/i
 
+const LODGING_NIGHTS_RE = /(\d+)\s*noche\(s\)/gi
+
+const MONTH_ABBR_ES = [
+  'ene',
+  'feb',
+  'mar',
+  'abr',
+  'may',
+  'jun',
+  'jul',
+  'ago',
+  'sep',
+  'oct',
+  'nov',
+  'dic',
+] as const
+
 function isBlank(v: unknown): boolean {
   return v === undefined || v === null || (typeof v === 'string' && !v.trim())
 }
 
 function isPlaceholderTitle(title: string): boolean {
   return !title.trim() || PLACEHOLDER_TITLE.test(title.trim())
+}
+
+/** Extract flight designator from AeroDataBox-style sourceUrl (`flight=AM221`). */
+export function extractFlightNumberFromSourceUrl(
+  sourceUrl: string | undefined,
+): string | undefined {
+  if (!sourceUrl) return undefined
+  const m = sourceUrl.match(/[?&]flight=([A-Za-z0-9]+)/i)
+  return m?.[1]?.toUpperCase()
+}
+
+function formatDayMonthEs(isoWithOffset: string): string | undefined {
+  const ymd = datePrefix(isoWithOffset)
+  if (!ymd) return undefined
+  const parts = ymd.split('-')
+  const month = Number(parts[1])
+  const day = Number(parts[2])
+  if (!month || !day || month < 1 || month > 12) return undefined
+  return `${day} ${MONTH_ABBR_ES[month - 1]}`
+}
+
+/**
+ * Deterministic title for a flight_schedule option when the LLM left a
+ * placeholder. Uses carrier + flight number + route + local times.
+ * Returns undefined when insufficient structured data exists.
+ */
+export function buildFlightScheduleTitle(o: {
+  provider?: string
+  sourceUrl?: string
+  origin?: string
+  destination?: string
+  startAt?: string
+  endAt?: string
+}): string | undefined {
+  const flight = extractFlightNumberFromSourceUrl(o.sourceUrl)
+  const ori = extractIataCode(o.origin) ?? undefined
+  const dest = extractIataCode(o.destination) ?? undefined
+  if (!flight || !ori || !dest || !o.startAt) return undefined
+  const carrier = (o.provider ?? '').trim() || flight.slice(0, 2)
+  const day = formatDayMonthEs(o.startAt)
+  const dep = formatClockEs(o.startAt)
+  const arr = o.endAt ? formatClockEs(o.endAt) : undefined
+  const time = arr ? `${dep} → ${arr}` : dep
+  const dayPart = day ? ` · ${day}` : ''
+  return `${carrier} ${flight} ${ori} → ${dest}${dayPart} · ${time}`
+}
+
+/** Calendar nights between start/end date prefixes (check-out − check-in). */
+export function lodgingNightsBetween(
+  startAt: string | undefined,
+  endAt: string | undefined,
+): number | null {
+  const s = datePrefix(startAt)
+  const e = datePrefix(endAt)
+  if (!s || !e) return null
+  const ds = Date.parse(`${s}T00:00:00Z`)
+  const de = Date.parse(`${e}T00:00:00Z`)
+  if (!Number.isFinite(ds) || !Number.isFinite(de) || de < ds) return null
+  return Math.round((de - ds) / 86_400_000)
+}
+
+/**
+ * When a lodging title embeds "N noche(s)", rewrite N to match startAt/endAt.
+ * Does not invent a nights phrase if the title has none.
+ */
+export function syncLodgingNightsInTitle(
+  title: string,
+  startAt: string | undefined,
+  endAt: string | undefined,
+): string {
+  if (!LODGING_NIGHTS_RE.test(title)) return title
+  LODGING_NIGHTS_RE.lastIndex = 0
+  const nights = lodgingNightsBetween(startAt, endAt)
+  if (nights === null || nights < 1) return title
+  return title.replace(LODGING_NIGHTS_RE, `${nights} noche(s)`)
 }
 
 const WEAK_SOURCE: Record<string, number> = {
@@ -482,11 +577,12 @@ function applyProvenanceInvariants(
 export function scrubNewPackageOption(
   proposed: PackageTravelOption,
 ): PackageTravelOption {
-  const title = cleanProposedText(proposed.title)?.trim() || proposed.title
+  let title = cleanProposedText(proposed.title)?.trim() || proposed.title
   const entityType = proposed.type || 'other'
   let sourceType = proposed.sourceType ?? 'agent'
   let sourceUrl = cleanProposedText(proposed.sourceUrl)
   let checkedAt = cleanProposedText(proposed.checkedAt)
+  const provider = cleanProposedText(proposed.provider)
   if (
     sourceType === 'flight_schedule' &&
     !allowsFlightScheduleProvenance(entityType)
@@ -495,10 +591,28 @@ export function scrubNewPackageOption(
     sourceUrl = undefined
     checkedAt = undefined
   }
+  if (
+    entityType === 'flight' &&
+    sourceType === 'flight_schedule' &&
+    isPlaceholderTitle(title)
+  ) {
+    const built = buildFlightScheduleTitle({
+      provider,
+      sourceUrl,
+      origin: proposed.origin,
+      destination: proposed.destination,
+      startAt: proposed.startAt,
+      endAt: proposed.endAt,
+    })
+    if (built) title = built
+  }
+  if (entityType === 'lodging') {
+    title = syncLodgingNightsInTitle(title, proposed.startAt, proposed.endAt)
+  }
   return {
     ...proposed,
     title,
-    provider: cleanProposedText(proposed.provider),
+    provider,
     description: cleanProposedText(proposed.description),
     origin: cleanProposedText(proposed.origin),
     destination: cleanProposedText(proposed.destination),
@@ -701,11 +815,16 @@ export function mergePreservedPackageOption(
         ? current.status
         : 'researched'
 
+  let finalTitle = title
+  if (entityType === 'lodging' && explicitTemporal) {
+    finalTitle = syncLodgingNightsInTitle(finalTitle, startAt, endAt)
+  }
+
   return {
     externalId: proposed.externalId,
     type: entityType,
     status,
-    title,
+    title: finalTitle,
     provider,
     description,
     startAt,

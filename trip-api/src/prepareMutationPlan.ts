@@ -230,8 +230,11 @@ function fieldChanges(
 }
 
 /**
- * Diff CURRENT vs NORMALIZED canonical desired state (+ remove ops).
+ * Diff CURRENT vs NORMALIZED canonical desired state (+ remove/supersede ops).
  * Does not surface RAW-discarded noise.
+ *
+ * Supersede NEW → OLD is rendered as REMOVE(OLD) + ADD(NEW) so the preview
+ * shows exactly what Apply will delete and create.
  */
 export function buildCanonicalDiff(args: {
   currentTrip: Trip | undefined
@@ -245,19 +248,27 @@ export function buildCanonicalDiff(args: {
     currentOptions.map((o) => [o.externalId ?? o.id, o]),
   )
 
-  const removedExt = new Set(
-    canonicalOps
-      .filter((o) => o.op === 'remove' && o.entityKind === 'travelOption')
-      .map((o) => o.externalId),
-  )
+  /** Old externalIds deleted by explicit remove OR supersede. */
+  const removedExt = new Map<string, string | undefined>()
+  for (const o of canonicalOps) {
+    if (o.entityKind !== 'travelOption') continue
+    if (o.op === 'remove') {
+      removedExt.set(o.externalId, undefined)
+    } else if (o.op === 'supersede' && o.supersedesExternalId) {
+      removedExt.set(o.supersedesExternalId, o.externalId)
+    }
+  }
 
-  for (const ext of [...removedExt].sort()) {
+  for (const ext of [...removedExt.keys()].sort()) {
     const cur = currentByExt.get(ext)
+    const replacedBy = removedExt.get(ext)
     lines.push({
       kind: 'remove',
       entityKind: 'travelOption',
       externalId: ext,
-      note: cur?.title,
+      note: replacedBy
+        ? `reemplazado por ${replacedBy}${cur?.title ? ` · ${cur.title}` : ''}`
+        : cur?.title,
       fields: cur
         ? [{ field: 'title', before: cur.title, after: null }]
         : undefined,
