@@ -39,6 +39,14 @@ GROUNDING (mandatory)
 - For entityId, use the entity's id field from TripContextSnapshot (e.g. travelOption.id). Do not invent ids.
 - For NEW flight options from searchFlightSchedules: put them in package.travelOptions with stable externalId (e.g. outbound-flight-2), startAt/endAt from the tool result, sourceType=flight_schedule, sourceUrl from the tool. Context claims may cite that same externalId as entityId — the server registers schedule-proven package options into grounding context. Do NOT cite fabricated flight ids that are not in the package and not backed by searchFlightSchedules clocks/route.
 - When updating an existing trip's flights: cite the NEW schedule-backed travelOption externalIds (and their startAt/endAt), NOT obsolete Dexie option ids whose clocks no longer match the statement. Natural-language statements are fine (e.g. "25 de septiembre … 11:15") as long as they refer to the same day and clock as the cited field.
+- When conserving an existing ground transfer (e.g. Guadalajara → San Miguel el Alto) already in TripContextSnapshot, keep that travelOption in package and prefer a context claim on its title/type. Do NOT invent a new transfer mode in narrative without a matching context or grounded option.
+- MUTATION OPS (executable — Apply runs ops[], NOT diffSummary): When replacing or dropping research entities on an existing trip, emit typed ops:
+  - add: new externalId in package
+  - update: same externalId in package (in-place)
+  - supersede: package has the NEW externalId; set supersedesExternalId to the OLD research externalId to remove
+  - remove: delete an obsolete research externalId explicitly (e.g. alternative return no longer wanted)
+  Absence from package alone does NOT delete. Always emit remove/supersede for obsolete flights when dates change.
+  CRITICAL when the context already has lodge-skeleton-* or ground-transfer-*: REUSE those same externalIds with op=update (change dates/notes). Do NOT invent lodge-skeleton-2/3 while leaving the old lodge orphaned. Prefer one lodging option updated in place.
 - Skeleton flight/lodging: prefer empty claims; put route/city details in package with verificationStatus=estimated and OMIT priceObserved, startAt, and endAt (no invented clocks, fares, or availability). Exception: clocks from searchFlightSchedules may be set with sourceType=flight_schedule, verificationStatus=estimated, https sourceUrl, and HORARIO PUBLICADO notes (schedule ≠ availability). Do NOT invent OTA/Google Flights sourceUrl without toolTrace. Only verified+sourceUrl options may carry concrete prices; schedules from the provider use estimated+flight_schedule.
 - Do NOT emit quotedFact or sourceTitle.
 - Do NOT convert currencies; do NOT invent transport modes or "suspendido/confirmado" without evidence.
@@ -113,6 +121,7 @@ export function buildFinalProposalPrompt(
     'Do NOT convert currencies or infer taxi/Uber/suspensión without explicit evidence.',
     'If the user asked for flights on a specific date: do NOT claim weekly/monthly route statistics. Prefer empty claims[] + honest narrative when day-specific schedules are missing.',
     'External events (serenata/fiestas/festival): do NOT remap an old event day onto the new trip weekend without toolTrace/context evidence for THAT date. Keep user intent as pendiente/fecha tentativa without affirming a concrete calendar day.',
+    'When replacing flights/options: emit ops supersede/remove with exact externalIds — Apply ignores diffSummary for deletes.',
     ...base,
   ].join('\n')
 }

@@ -14,7 +14,7 @@ import type { ImportUpdatePlan } from './packageImport'
 import { enrichTripPackageAirportArrivals } from './airportArrivalEnrich'
 import { validateTripPackage } from './tripPackage'
 import { buildTripContextSnapshot } from './tripContextSnapshot'
-import { httpRepositories } from '../data/repositories/httpRepositories'
+import { httpRepositories, apiImportPackage } from '../data/repositories/httpRepositories'
 
 export type { AgentProposal }
 
@@ -223,7 +223,14 @@ export async function applyAgentProposal(
       validated.errors.map((e) => `${e.path}: ${e.message}`).join('; '),
     )
   }
-  const result = await services.packages.importPackage(validated.package)
+  const tripId = validated.package.trip.id
+  const body = {
+    package: validated.package,
+    ops: proposal.ops ?? [],
+  }
+  const result = tripId
+    ? await apiImportPackage(body, tripId)
+    : await services.packages.importPackage(body)
   return { tripId: result.tripId }
 }
 

@@ -195,6 +195,9 @@ export type ImportPackageApiResult = {
   updated: number
   unchanged: number
   decisionsPreserved: number
+  removed?: number
+  removedDerived?: number
+  opsApplied?: number
 }
 
 /** Server-side transactional import (preferred over many client PUTs). */

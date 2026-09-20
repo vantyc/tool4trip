@@ -24,6 +24,15 @@ import type {
   TravelOption,
   Trip,
 } from './domainTypes.ts'
+import {
+  executeValidatedDeletes,
+  parseImportBody,
+  validateMutationOps,
+  PackageMutationValidationError,
+  type ParsedImportBody,
+} from './packageMutation.ts'
+import { compileMutationPlan } from './compileMutationPlan.ts'
+import type { AgentOpRecord } from '../../shared/agentContracts.ts'
 import { store } from './store.ts'
 
 export class PackageValidationImportError extends Error {
@@ -49,6 +58,10 @@ export type ImportPackageResult = {
   updated: number
   unchanged: number
   decisionsPreserved: number
+  /** Explicit remove/supersede deletions executed */
+  removed: number
+  removedDerived: number
+  opsApplied: number
 }
 
 function nowIso(): string {
@@ -149,13 +162,21 @@ function buildOptionFromPackage(
 export async function importPackage(
   client: pg.PoolClient,
   raw: unknown,
-  opts?: { tripId?: string },
+  opts?: { tripId?: string; ops?: AgentOpRecord[] },
 ): Promise<ImportPackageResult> {
-  const validated = validateTripPackage(raw)
+  let rawPackage = raw
+  let ops: AgentOpRecord[] = opts?.ops ?? []
+  if (opts?.ops === undefined) {
+    const parsed: ParsedImportBody = parseImportBody(raw)
+    rawPackage = parsed.rawPackage
+    ops = parsed.ops
+  }
+
+  const validated = validateTripPackage(rawPackage)
   if (!validated.ok) {
     throw new PackageValidationImportError(validated.errors)
   }
-  const pkg = enrichTripPackageAirportArrivals(validated.package)
+  let pkg = enrichTripPackageAirportArrivals(validated.package)
 
   const existingImport = await store.getPackageImport(client, pkg.packageId)
   const tripId =
@@ -163,6 +184,37 @@ export async function importPackage(
   const existingTrip = await store.getTrip(client, tripId)
   const createdTrip = !existingTrip
   const now = nowIso()
+
+  const existingOptions = await store.listTravelOptions(client, tripId)
+
+  // Deterministic compiler: LLM ops are hints only when updating an existing trip.
+  let opsForApply = ops
+  if (existingTrip && existingOptions.length > 0) {
+    const compiled = compileMutationPlan({
+      tripId,
+      currentTrip: existingTrip,
+      currentOptions: existingOptions,
+      proposedPackage: pkg,
+      llmOps: ops,
+    })
+    if (compiled.status === 'review_required') {
+      throw new PackageMutationValidationError(
+        compiled.conflicts.length
+          ? compiled.conflicts
+          : ['mutation plan requires review'],
+      )
+    }
+    pkg = enrichTripPackageAirportArrivals(compiled.package)
+    opsForApply = compiled.ops
+  }
+
+  // Validate compiled (or legacy) ops BEFORE any writes (atomic fail-closed).
+  const mutationPlan = validateMutationOps({
+    pkg,
+    tripId,
+    ops: opsForApply,
+    existingOptions,
+  })
 
   const trip: Trip = existingTrip
     ? {
@@ -339,6 +391,13 @@ export async function importPackage(
   for (const r of remindersToWrite) await store.putReminder(client, r)
   await store.putPackageImport(client, importRecord)
 
+  const { removedOptions, removedDerived } = await executeValidatedDeletes(
+    client,
+    { pkg, tripId, plan: mutationPlan },
+  )
+
+  const opsApplied = opsForApply.filter((o) => o.op !== 'noop').length
+
   return {
     tripId,
     packageId: pkg.packageId,
@@ -350,6 +409,9 @@ export async function importPackage(
     updated,
     unchanged,
     decisionsPreserved,
+    removed: removedOptions,
+    removedDerived,
+    opsApplied,
   }
 }
 

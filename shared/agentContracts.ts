@@ -94,6 +94,15 @@ const packageTravelOptionSchema = z
     verificationStatus: verificationStatus.optional(),
     sourceType: sourceType.default('agent'),
     notes: z.string().optional(),
+    logicalRole: z
+      .enum([
+        'flight_outbound',
+        'flight_return',
+        'lodging_primary',
+        'lodging_fallback',
+        'ground_transfer',
+      ])
+      .optional(),
   })
   .strict()
   .superRefine((opt, ctx) => {
@@ -152,7 +161,21 @@ export const tripPackageV1Schema = z
 
 export type SharedTripPackageV1 = z.infer<typeof tripPackageV1Schema>
 
-export const agentOpSchema = z.enum(['add', 'update', 'supersede', 'noop'])
+/**
+ * Executable mutation ops for Ask Travel Apply (not presentation).
+ * - add / update: entity must appear in package (upsert by externalId)
+ * - supersede: package carries `externalId` (new); removes `supersedesExternalId` (old)
+ * - remove: deletes `externalId` explicitly — absence from package alone is NOT a delete
+ * - noop: ignored by Apply
+ * diffSummary may mirror these for UI only; Apply executes `ops[]`.
+ */
+export const agentOpSchema = z.enum([
+  'add',
+  'update',
+  'supersede',
+  'remove',
+  'noop',
+])
 
 export const agentDiffLineSchema = z
   .object({
@@ -172,7 +195,7 @@ export const agentDiffLineSchema = z
   })
   .strict()
 
-/** Reserved for future supersede; Fase 1 may omit or mirror package. */
+/** Typed mutation op executed by Apply (trip-api import-package). */
 export const agentOpRecordSchema = z
   .object({
     op: agentOpSchema,
@@ -182,9 +205,37 @@ export const agentOpRecordSchema = z
       'checklistItem',
       'note',
     ]),
+    /** For add/update/supersede: new/target entity in package. For remove: entity to delete. */
     externalId: z.string().min(1),
+    /** Required when op=supersede: research entity replaced by externalId. */
     supersedesExternalId: z.string().min(1).optional(),
     note: z.string().optional(),
+  })
+  .strict()
+  .superRefine((op, ctx) => {
+    if (op.op === 'supersede' && !op.supersedesExternalId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'supersede requires supersedesExternalId',
+        path: ['supersedesExternalId'],
+      })
+    }
+    if (op.op === 'remove' && op.supersedesExternalId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'remove must not set supersedesExternalId',
+        path: ['supersedesExternalId'],
+      })
+    }
+  })
+
+export type AgentOpRecord = z.infer<typeof agentOpRecordSchema>
+
+/** Body for transactional Apply: package upsert + explicit ops. */
+export const packageApplyBodySchema = z
+  .object({
+    package: tripPackageV1Schema,
+    ops: z.array(agentOpRecordSchema).default([]),
   })
   .strict()
 

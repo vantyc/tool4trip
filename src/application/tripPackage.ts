@@ -115,6 +115,15 @@ const packageTravelOptionSchema = z
     verificationStatus: verificationStatus.optional(),
     sourceType: sourceType.default('cursor'),
     notes: z.string().optional(),
+    logicalRole: z
+      .enum([
+        'flight_outbound',
+        'flight_return',
+        'lodging_primary',
+        'lodging_fallback',
+        'ground_transfer',
+      ])
+      .optional(),
   })
   .strict()
   .superRefine((opt, ctx) => {

@@ -6,6 +6,10 @@ import {
   upsertTripBundle,
   type TripBundle,
 } from './importPackage.ts'
+import {
+  PackageMutationConflictError,
+  PackageMutationValidationError,
+} from './packageMutation.ts'
 import { migrate } from './schema.ts'
 import { ConflictError, NotFoundError, store } from './store.ts'
 import type {
@@ -400,6 +404,22 @@ async function handleRequest(
       } catch (err) {
         if (err instanceof PackageValidationImportError) {
           sendJson(res, 400, { error: err.message, details: err.errors })
+          return
+        }
+        if (err instanceof PackageMutationValidationError) {
+          sendJson(res, 400, {
+            error: err.message,
+            code: err.code,
+            details: err.details,
+          })
+          return
+        }
+        if (err instanceof PackageMutationConflictError) {
+          sendJson(res, 409, {
+            error: err.message,
+            code: err.code,
+            conflicts: err.conflicts,
+          })
           return
         }
         throw err

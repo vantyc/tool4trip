@@ -127,6 +127,9 @@ export type ImportPackageResult = {
   updated: number
   unchanged: number
   decisionsPreserved: number
+  removed?: number
+  removedDerived?: number
+  opsApplied?: number
 }
 
 export function createTravelOptionService(repos: Repositories) {
@@ -320,13 +323,28 @@ export function createPackageImportService(repos: Repositories) {
 
     /**
      * Validate + import/upsert TripPackage v1 via trip-api (transactional on server).
-     * Re-import updates by externalId; never deletes missing options;
+     * Re-import updates by externalId; never deletes missing options by absence alone.
+     * Explicit ops (remove/supersede) are executed when body is `{ package, ops }`.
      * never overwrites selected/booked/rejected or bookingId.
      */
     importPackage: async (
       raw: unknown,
       _options?: { force?: boolean },
     ): Promise<ImportPackageResult> => {
+      // Pass through wrapped { package, ops } or raw TripPackage — trip-api parses both.
+      if (
+        raw &&
+        typeof raw === 'object' &&
+        'package' in (raw as object) &&
+        !('schemaVersion' in (raw as object))
+      ) {
+        const wrap = raw as { package: unknown; ops?: unknown }
+        const tripId =
+          wrap.package &&
+          typeof wrap.package === 'object' &&
+          (wrap.package as { trip?: { id?: string } }).trip?.id
+        return apiImportPackage(raw, tripId)
+      }
       const validated = validateTripPackage(raw)
       if (!validated.ok) {
         throw new PackageValidationImportError(validated.errors)

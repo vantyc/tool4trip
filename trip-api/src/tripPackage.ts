@@ -94,6 +94,16 @@ const packageTripSchema = z
     path: ['endDate'],
   })
 
+const logicalRole = z
+  .enum([
+    'flight_outbound',
+    'flight_return',
+    'lodging_primary',
+    'lodging_fallback',
+    'ground_transfer',
+  ])
+  .optional()
+
 const packageTravelOptionSchema = z
   .object({
     externalId,
@@ -115,6 +125,8 @@ const packageTravelOptionSchema = z
     verificationStatus: verificationStatus.optional(),
     sourceType: sourceType.default('cursor'),
     notes: z.string().optional(),
+    /** Optional structured role for deterministic mutation matching. */
+    logicalRole,
   })
   .strict()
   .superRefine((opt, ctx) => {

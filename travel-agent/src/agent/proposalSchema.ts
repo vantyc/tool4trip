@@ -107,7 +107,7 @@ export const agentProposalJsonSchema = {
           entityRef: strOrNull,
           op: {
             type: 'string',
-            enum: ['add', 'update', 'supersede', 'noop'],
+            enum: ['add', 'update', 'supersede', 'remove', 'noop'],
           },
           before: strOrNull,
           after: strOrNull,
@@ -301,7 +301,7 @@ export const agentProposalJsonSchema = {
         properties: {
           op: {
             type: 'string',
-            enum: ['add', 'update', 'supersede', 'noop'],
+            enum: ['add', 'update', 'supersede', 'remove', 'noop'],
           },
           entityKind: {
             type: 'string',
