@@ -1,9 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type pg from 'pg'
-import {
-  enrichTripPackageAirportArrivals,
-  isAirportArrivalExternalId,
-} from './airportArrivalEnrich.ts'
+import { isAirportArrivalExternalId } from './airportArrivalEnrich.ts'
 import {
   USER_DECISION_STATUSES,
   checklistEntityId,
@@ -31,11 +28,10 @@ import {
   PackageMutationValidationError,
   type ParsedImportBody,
 } from './packageMutation.ts'
-import { compileMutationPlan } from './compileMutationPlan.ts'
 import {
   logPostgresSanitize,
-  sanitizeForPostgres,
 } from './postgresSanitize.ts'
+import { prepareMutationPlan, enforcePreviewGate, PreviewGateError } from './prepareMutationPlan.ts'
 import type { AgentOpRecord } from '../../shared/agentContracts.ts'
 import { store } from './store.ts'
 
@@ -48,6 +44,30 @@ export class PackageValidationImportError extends Error {
     )
     this.name = 'PackageValidationImportError'
     this.errors = errors
+  }
+}
+
+export class PreviewStaleError extends Error {
+  readonly code = 'preview_stale'
+  readonly currentFingerprint: string
+  readonly expectedFingerprint: string
+  constructor(currentFingerprint: string, expectedFingerprint: string) {
+    super('preview_stale')
+    this.name = 'PreviewStaleError'
+    this.currentFingerprint = currentFingerprint
+    this.expectedFingerprint = expectedFingerprint
+  }
+}
+
+export class PlanChangedError extends Error {
+  readonly code = 'plan_changed'
+  readonly currentPlanHash: string
+  readonly expectedPlanHash: string
+  constructor(currentPlanHash: string, expectedPlanHash: string) {
+    super('plan_changed')
+    this.name = 'PlanChangedError'
+    this.currentPlanHash = currentPlanHash
+    this.expectedPlanHash = expectedPlanHash
   }
 }
 
@@ -66,6 +86,20 @@ export type ImportPackageResult = {
   removed: number
   removedDerived: number
   opsApplied: number
+}
+
+export type ImportPackageOpts = {
+  tripId?: string
+  ops?: AgentOpRecord[]
+  /**
+   * Ask Travel / compile-preview gate.
+   * When requirePreviewGate is true, expectedFingerprint is mandatory.
+   * Legacy callers omit both → no stale gate.
+   */
+  expectedFingerprint?: string
+  expectedPlanHash?: string
+  requirePreviewGate?: boolean
+  proposalId?: string
 }
 
 function nowIso(): string {
@@ -163,68 +197,131 @@ function buildOptionFromPackage(
   }
 }
 
+function extractApplyGate(raw: unknown): {
+  expectedFingerprint?: string
+  expectedPlanHash?: string
+  requirePreviewGate?: boolean
+  proposalId?: string
+} {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const rec = raw as Record<string, unknown>
+  return {
+    expectedFingerprint:
+      typeof rec.expectedFingerprint === 'string'
+        ? rec.expectedFingerprint
+        : undefined,
+    expectedPlanHash:
+      typeof rec.expectedPlanHash === 'string'
+        ? rec.expectedPlanHash
+        : undefined,
+    requirePreviewGate: rec.requirePreviewGate === true,
+    proposalId:
+      typeof rec.proposalId === 'string' ? rec.proposalId : undefined,
+  }
+}
+
 export async function importPackage(
   client: pg.PoolClient,
   raw: unknown,
-  opts?: { tripId?: string; ops?: AgentOpRecord[] },
+  opts?: ImportPackageOpts,
 ): Promise<ImportPackageResult> {
   let rawPackage = raw
   let ops: AgentOpRecord[] = opts?.ops ?? []
+  const gateFromBody = extractApplyGate(raw)
   if (opts?.ops === undefined) {
     const parsed: ParsedImportBody = parseImportBody(raw)
     rawPackage = parsed.rawPackage
     ops = parsed.ops
   }
 
-  const validated = validateTripPackage(rawPackage)
-  if (!validated.ok) {
-    throw new PackageValidationImportError(validated.errors)
-  }
-  let pkg = enrichTripPackageAirportArrivals(validated.package)
+  const expectedFingerprint =
+    (opts?.expectedFingerprint ?? gateFromBody.expectedFingerprint)?.trim() ||
+    undefined
+  const expectedPlanHash =
+    (opts?.expectedPlanHash ?? gateFromBody.expectedPlanHash)?.trim() ||
+    undefined
+  const requirePreviewGate =
+    opts?.requirePreviewGate ?? gateFromBody.requirePreviewGate ?? false
 
-  const existingImport = await store.getPackageImport(client, pkg.packageId)
+  const validatedEarly = validateTripPackage(rawPackage)
+  if (!validatedEarly.ok) {
+    throw new PackageValidationImportError(validatedEarly.errors)
+  }
+  const earlyPkg = validatedEarly.package
+
+  const existingImport = await store.getPackageImport(client, earlyPkg.packageId)
   const tripId =
-    opts?.tripId ?? existingImport?.tripId ?? pkg.trip.id ?? randomUUID()
+    opts?.tripId ?? existingImport?.tripId ?? earlyPkg.trip.id ?? randomUUID()
   const existingTrip = await store.getTrip(client, tripId)
   const createdTrip = !existingTrip
   const now = nowIso()
-
   const existingOptions = await store.listTravelOptions(client, tripId)
 
-  // Deterministic compiler: LLM ops are hints only when updating an existing trip.
-  let opsForApply = ops
-  if (existingTrip && existingOptions.length > 0) {
-    const compiled = compileMutationPlan({
-      tripId,
-      currentTrip: existingTrip,
-      currentOptions: existingOptions,
-      proposedPackage: pkg,
-      llmOps: ops,
+  if (
+    requirePreviewGate &&
+    existingTrip &&
+    existingOptions.length > 0 &&
+    !expectedFingerprint
+  ) {
+    throw new PackageMutationValidationError([
+      'expectedFingerprint required when requirePreviewGate=true',
+    ])
+  }
+
+  const prepared = prepareMutationPlan({
+    tripId,
+    currentTrip: existingTrip,
+    currentOptions: existingOptions,
+    rawPackage,
+    llmOps: ops,
+  })
+
+  try {
+    enforcePreviewGate(prepared, {
+      expectedFingerprint,
+      expectedPlanHash,
+      requirePreviewGate,
+      existingTripWithOptions: Boolean(
+        existingTrip && existingOptions.length > 0,
+      ),
     })
-    if (compiled.status === 'review_required') {
-      throw new PackageMutationValidationError(
-        compiled.conflicts.length
-          ? compiled.conflicts
-          : ['mutation plan requires review'],
-      )
+  } catch (e) {
+    if (e instanceof PreviewGateError) {
+      if (e.code === 'preview_stale') {
+        throw new PreviewStaleError(
+          e.currentFingerprint ?? prepared.fingerprint,
+          e.expectedFingerprint ?? expectedFingerprint ?? '',
+        )
+      }
+      if (e.code === 'plan_changed') {
+        throw new PlanChangedError(
+          e.currentPlanHash ?? prepared.planHash,
+          e.expectedPlanHash ?? expectedPlanHash ?? '',
+        )
+      }
+      throw new PackageMutationValidationError([e.message])
     }
-    pkg = enrichTripPackageAirportArrivals(compiled.package)
-    opsForApply = compiled.ops
+    throw e
   }
 
-  // Pre-write: make the full mutation package PostgreSQL-safe before any upserts.
-  {
-    const sanitized = sanitizeForPostgres(pkg, '$.package')
-    if (sanitized.changed) {
-      logPostgresSanitize(
-        { collection: 'import-package', tripId, entityId: pkg.packageId },
-        sanitized.events,
-      )
-      pkg = sanitized.value
-    }
+  if (prepared.status === 'review_required') {
+    throw new PackageMutationValidationError(
+      prepared.conflicts.length
+        ? prepared.conflicts
+        : ['mutation plan requires review'],
+    )
   }
 
-  // Validate compiled (or legacy) ops BEFORE any writes (atomic fail-closed).
+  const pkg = prepared.normalizedPackage
+  const opsForApply = prepared.canonicalOps
+
+  if (prepared.sanitizeEvents.length) {
+    logPostgresSanitize(
+      { collection: 'import-package', tripId, entityId: pkg.packageId },
+      prepared.sanitizeEvents,
+    )
+  }
+
   const mutationPlan = validateMutationOps({
     pkg,
     tripId,
@@ -297,10 +394,29 @@ export async function importPackage(
         verificationStatus: existing.verificationStatus,
         sourceType: existing.sourceType,
         notes: existing.notes,
-        status: incoming.status,
+        status: next.status,
       })
-      const after = researchFingerprint(incoming)
-      if (beforeNorm === after) unchanged += 1
+      const afterNorm = researchFingerprint({
+        type: next.type,
+        title: next.title,
+        provider: next.provider,
+        description: next.description,
+        startAt: next.startAt,
+        endAt: next.endAt,
+        origin: next.origin,
+        destination: next.destination,
+        address: next.address,
+        phone: next.phone,
+        priceObserved: next.priceObserved,
+        currency: next.currency,
+        sourceUrl: next.sourceUrl,
+        checkedAt: next.checkedAt,
+        verificationStatus: next.verificationStatus,
+        sourceType: next.sourceType,
+        notes: next.notes,
+        status: next.status,
+      })
+      if (beforeNorm === afterNorm) unchanged += 1
       else updated += 1
     }
     optionsToWrite.push(next)

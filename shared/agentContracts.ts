@@ -236,8 +236,28 @@ export const packageApplyBodySchema = z
   .object({
     package: tripPackageV1Schema,
     ops: z.array(agentOpRecordSchema).default([]),
+    /** From compile-preview; required by Ask Travel client (requirePreviewGate). */
+    expectedFingerprint: z.string().min(1).optional(),
+    expectedPlanHash: z.string().min(1).optional(),
+    proposalId: z.string().min(1).optional(),
+    /**
+     * Ask Travel sets true so the server rejects Apply without a fingerprint.
+     * Legacy package import omits this → no stale gate.
+     */
+    requirePreviewGate: z.boolean().optional(),
   })
   .strict()
+
+/** Body for compile-preview (no write). */
+export const compilePreviewBodySchema = z
+  .object({
+    package: tripPackageV1Schema,
+    ops: z.array(agentOpRecordSchema).default([]),
+    proposalId: z.string().min(1).optional(),
+  })
+  .strict()
+
+export type CompilePreviewBody = z.infer<typeof compilePreviewBodySchema>
 
 export const toolTraceEntrySchema = z
   .object({

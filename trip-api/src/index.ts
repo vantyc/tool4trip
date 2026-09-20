@@ -3,6 +3,8 @@ import { createPool, withTransaction, type Db } from './db.ts'
 import {
   importPackage,
   PackageValidationImportError,
+  PlanChangedError,
+  PreviewStaleError,
   upsertTripBundle,
   type TripBundle,
 } from './importPackage.ts'
@@ -10,6 +12,8 @@ import {
   PackageMutationConflictError,
   PackageMutationValidationError,
 } from './packageMutation.ts'
+import { prepareMutationPlan } from './prepareMutationPlan.ts'
+import { compilePreviewBodySchema } from '../../shared/agentContracts.ts'
 import { migrate } from './schema.ts'
 import { ConflictError, NotFoundError, store } from './store.ts'
 import type {
@@ -89,6 +93,7 @@ type RouteMatch = {
     | 'collection'
     | 'entity'
     | 'import'
+    | 'compile-preview'
     | 'migrate'
     | 'byId'
   tripId?: string
@@ -133,6 +138,9 @@ function matchRoute(urlPath: string): RouteMatch | null {
 
   let m = /^\/api\/trips\/([^/]+)\/import-package$/.exec(urlPath)
   if (m) return { kind: 'import', tripId: decodeURIComponent(m[1]!) }
+
+  m = /^\/api\/trips\/([^/]+)\/compile-preview$/.exec(urlPath)
+  if (m) return { kind: 'compile-preview', tripId: decodeURIComponent(m[1]!) }
 
   m = /^\/api\/trips\/([^/]+)$/.exec(urlPath)
   if (m) return { kind: 'trip', tripId: decodeURIComponent(m[1]!) }
@@ -406,6 +414,24 @@ async function handleRequest(
           sendJson(res, 400, { error: err.message, details: err.errors })
           return
         }
+        if (err instanceof PreviewStaleError) {
+          sendJson(res, 409, {
+            error: 'preview_stale',
+            code: err.code,
+            currentFingerprint: err.currentFingerprint,
+            expectedFingerprint: err.expectedFingerprint,
+          })
+          return
+        }
+        if (err instanceof PlanChangedError) {
+          sendJson(res, 409, {
+            error: 'plan_changed',
+            code: err.code,
+            currentPlanHash: err.currentPlanHash,
+            expectedPlanHash: err.expectedPlanHash,
+          })
+          return
+        }
         if (err instanceof PackageMutationValidationError) {
           sendJson(res, 400, {
             error: err.message,
@@ -424,6 +450,53 @@ async function handleRequest(
         }
         throw err
       }
+      return
+    }
+
+    if (route.kind === 'compile-preview') {
+      if (method !== 'POST') {
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      if (!route.tripId) {
+        sendJson(res, 400, { error: 'tripId required' })
+        return
+      }
+      const body = await parseJson(req, res)
+      if (body === null) return
+      const parsed = compilePreviewBodySchema.safeParse(body)
+      if (!parsed.success) {
+        sendJson(res, 400, {
+          error: 'invalid compile-preview body',
+          details: parsed.error.message.slice(0, 500),
+        })
+        return
+      }
+      const tripId = route.tripId
+      const existingTrip = await store.getTrip(pool, tripId)
+      if (!existingTrip) {
+        sendJson(res, 404, { error: 'trip not found' })
+        return
+      }
+      const existingOptions = await store.listTravelOptions(pool, tripId)
+      const prepared = prepareMutationPlan({
+        tripId,
+        currentTrip: existingTrip,
+        currentOptions: existingOptions,
+        rawPackage: parsed.data.package,
+        llmOps: parsed.data.ops,
+      })
+      sendJson(res, 200, {
+        status: prepared.status,
+        conflicts: prepared.conflicts,
+        warnings: prepared.warnings,
+        canonicalOps: prepared.canonicalOps,
+        normalizedPackage: prepared.normalizedPackage,
+        diff: prepared.diff,
+        fingerprint: prepared.fingerprint,
+        planHash: prepared.planHash,
+        proposalId: parsed.data.proposalId,
+      })
       return
     }
 

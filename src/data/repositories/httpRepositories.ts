@@ -214,6 +214,42 @@ export async function apiImportPackage(
   })
 }
 
+export type CompilePreviewApiResult = {
+  status: 'ok' | 'review_required'
+  conflicts: string[]
+  warnings: string[]
+  canonicalOps: unknown[]
+  normalizedPackage: unknown
+  diff: Array<{
+    kind: 'remove' | 'add' | 'update' | 'keep'
+    entityKind: 'travelOption' | 'trip'
+    externalId: string
+    fields?: Array<{ field: string; before: unknown; after: unknown }>
+    note?: string
+  }>
+  fingerprint: string
+  planHash: string
+  proposalId?: string
+}
+
+/** Read-only canonical preview (same prepareMutationPlan as Apply). */
+export async function apiCompilePreview(
+  tripId: string,
+  body: {
+    package: unknown
+    ops?: unknown[]
+    proposalId?: string
+  },
+): Promise<CompilePreviewApiResult> {
+  return apiFetch<CompilePreviewApiResult>(
+    `/api/trips/${encodeURIComponent(tripId)}/compile-preview`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  )
+}
+
 export type TripMigrateBundle = {
   trip: Trip
   bookings?: Booking[]

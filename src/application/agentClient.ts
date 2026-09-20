@@ -14,9 +14,26 @@ import type { ImportUpdatePlan } from './packageImport'
 import { enrichTripPackageAirportArrivals } from './airportArrivalEnrich'
 import { validateTripPackage } from './tripPackage'
 import { buildTripContextSnapshot } from './tripContextSnapshot'
-import { httpRepositories, apiImportPackage } from '../data/repositories/httpRepositories'
+import { httpRepositories, apiImportPackage, apiCompilePreview, type CompilePreviewApiResult } from '../data/repositories/httpRepositories'
+import { ApiError } from '../data/repositories/apiClient'
 
 export type { AgentProposal }
+export type CanonicalPreview = CompilePreviewApiResult
+
+export class PreviewStaleApplyError extends Error {
+  readonly code: 'preview_stale' | 'plan_changed'
+  readonly body: unknown
+  constructor(code: 'preview_stale' | 'plan_changed', body?: unknown) {
+    super(
+      code === 'preview_stale'
+        ? 'La información del viaje cambió desde esta vista previa.'
+        : 'El plan canónico cambió desde esta vista previa.',
+    )
+    this.name = 'PreviewStaleApplyError'
+    this.code = code
+    this.body = body
+  }
+}
 
 const POLL_MS = 2000
 const POLL_MAX_MS = 5 * 60_000
@@ -186,8 +203,10 @@ export async function previewAgentProposal(
      * (avoids GET /api/package-imports/:id 404 on every generate).
      */
     assumeNewPackage?: boolean
+    /** Existing trip: use server compile-preview (canonical). */
+    tripId?: string
   },
-): Promise<{ plan: ImportUpdatePlan }> {
+): Promise<{ plan: ImportUpdatePlan; canonical?: CanonicalPreview }> {
   const validated = validateTripPackage(proposal.package)
   if (!validated.ok) {
     throw new Error(
@@ -209,6 +228,37 @@ export async function previewAgentProposal(
       },
     }
   }
+
+  const tripId = opts?.tripId ?? enriched.trip.id
+  if (tripId) {
+    const canonical = await apiCompilePreview(tripId, {
+      package: proposal.package,
+      ops: proposal.ops ?? [],
+      proposalId: proposal.proposalId,
+    })
+    const updates = canonical.diff.filter((d) => d.kind === 'update').length
+    const adds = canonical.diff.filter((d) => d.kind === 'add').length
+    return {
+      canonical,
+      plan: {
+        isUpdate: true,
+        packageId: enriched.packageId,
+        revision: enriched.revision,
+        tripId,
+        created: adds,
+        updated: updates,
+        unchanged: Math.max(
+          0,
+          (((canonical.normalizedPackage as { travelOptions?: unknown[] })
+            ?.travelOptions?.length ?? 0) -
+            updates -
+            adds),
+        ),
+        decisionsPreserved: 0,
+      },
+    }
+  }
+
   const plan = await services.packages.planImport(enriched)
   return { plan }
 }
@@ -216,6 +266,11 @@ export async function previewAgentProposal(
 export async function applyAgentProposal(
   services: Services,
   proposal: AgentProposal,
+  opts?: {
+    expectedFingerprint?: string
+    expectedPlanHash?: string
+    requirePreviewGate?: boolean
+  },
 ): Promise<{ tripId: string }> {
   const validated = validateTripPackage(proposal.package)
   if (!validated.ok) {
@@ -227,11 +282,31 @@ export async function applyAgentProposal(
   const body = {
     package: validated.package,
     ops: proposal.ops ?? [],
+    proposalId: proposal.proposalId,
+    expectedFingerprint: opts?.expectedFingerprint,
+    expectedPlanHash: opts?.expectedPlanHash,
+    requirePreviewGate: opts?.requirePreviewGate ?? Boolean(opts?.expectedFingerprint),
   }
-  const result = tripId
-    ? await apiImportPackage(body, tripId)
-    : await services.packages.importPackage(body)
-  return { tripId: result.tripId }
+  try {
+    const result = tripId
+      ? await apiImportPackage(body, tripId)
+      : await services.packages.importPackage(body)
+    return { tripId: result.tripId }
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      const code =
+        err.body &&
+        typeof err.body === 'object' &&
+        'error' in err.body &&
+        typeof (err.body as { error: unknown }).error === 'string'
+          ? (err.body as { error: string }).error
+          : ''
+      if (code === 'preview_stale' || code === 'plan_changed') {
+        throw new PreviewStaleApplyError(code, err.body)
+      }
+    }
+    throw err
+  }
 }
 
 /**
