@@ -339,10 +339,12 @@ export function createPackageImportService(repos: Repositories) {
         !('schemaVersion' in (raw as object))
       ) {
         const wrap = raw as { package: unknown; ops?: unknown }
+        const pkgObj =
+          wrap.package && typeof wrap.package === 'object'
+            ? (wrap.package as { trip?: { id?: string } })
+            : null
         const tripId =
-          wrap.package &&
-          typeof wrap.package === 'object' &&
-          (wrap.package as { trip?: { id?: string } }).trip?.id
+          typeof pkgObj?.trip?.id === 'string' ? pkgObj.trip.id : undefined
         return apiImportPackage(raw, tripId)
       }
       const validated = validateTripPackage(raw)
