@@ -4,6 +4,7 @@ import {
   augmentContextWithProvenFlightSchedules,
   stampProvenScheduleOptions,
 } from '../flights/mergeSchedules.ts'
+import { demoteUnverifiedExternalEventDates } from './eventDateGrounding.ts'
 import { scrubUnsupportedFreeTextAssertions } from './researchCoverage.ts'
 
 /**
@@ -1033,7 +1034,6 @@ function claimCoversSignal(
   return false
 }
 
-
 function collectPackageTexts(pkg: unknown): { where: string; text: string }[] {
   const out: { where: string; text: string }[] = []
   // Identifiers / enums / URLs are not narrative operational assertions
@@ -1593,6 +1593,11 @@ export function assertDraftGrounded(
       const concreteWarnings = scrubUngroundedConcreteFields(draft, {
         scrubItineraryClocks: true,
       })
+      const eventDateWarnings = demoteUnverifiedExternalEventDates(
+        draft,
+        toolTrace,
+        groundingContext,
+      )
       const freeTextWarnings = scrubUnsupportedFreeTextAssertions(
         draft,
         toolTrace,
@@ -1610,6 +1615,7 @@ export function assertDraftGrounded(
         dropNote,
         ...warnings,
         ...concreteWarnings,
+        ...eventDateWarnings,
         ...freeTextWarnings,
       ]
       return {
@@ -1621,6 +1627,7 @@ export function assertDraftGrounded(
           dropNote,
           ...warnings,
           ...concreteWarnings,
+          ...eventDateWarnings,
           ...freeTextWarnings,
         ],
         draft,
@@ -1667,6 +1674,11 @@ export function assertDraftGrounded(
     const concreteWarnings = scrubUngroundedConcreteFields(draft, {
       scrubItineraryClocks: true,
     })
+    const eventDateWarnings = demoteUnverifiedExternalEventDates(
+      draft,
+      toolTrace,
+      groundingContext,
+    )
     const freeTextWarnings = scrubUnsupportedFreeTextAssertions(
       draft,
       toolTrace,
@@ -1680,6 +1692,7 @@ export function assertDraftGrounded(
       ...prev,
       ...stampWarnings,
       ...concreteWarnings,
+      ...eventDateWarnings,
       ...freeTextWarnings,
     ]
     return {
@@ -1689,6 +1702,7 @@ export function assertDraftGrounded(
         ...stampWarnings,
         ...aggregateWarnings,
         ...concreteWarnings,
+        ...eventDateWarnings,
         ...freeTextWarnings,
       ],
       draft,
@@ -1699,16 +1713,22 @@ export function assertDraftGrounded(
     draft,
     valid,
   )
+  const eventDateWarnings = demoteUnverifiedExternalEventDates(
+    rewritten,
+    toolTrace,
+    groundingContext,
+  )
   const allServerWarnings = [
     ...stampWarnings,
     ...aggregateWarnings,
     ...serverWarnings,
+    ...eventDateWarnings,
   ]
 
   const signals = collectAllOperationalSignals(rewritten)
-  const uncovered = signals.filter((sig) => {
-    return !valid.some((claim) => claimCoversSignal(claim, sig))
-  })
+  const uncovered = signals.filter(
+    (sig) => !valid.some((claim) => claimCoversSignal(claim, sig)),
+  )
 
   if (uncovered.length) {
     const warnings = uncovered.map(

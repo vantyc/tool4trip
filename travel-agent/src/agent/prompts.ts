@@ -42,7 +42,8 @@ GROUNDING (mandatory)
 - Skeleton flight/lodging: prefer empty claims; put route/city details in package with verificationStatus=estimated and OMIT priceObserved, startAt, and endAt (no invented clocks, fares, or availability). Exception: clocks from searchFlightSchedules may be set with sourceType=flight_schedule, verificationStatus=estimated, https sourceUrl, and HORARIO PUBLICADO notes (schedule ≠ availability). Do NOT invent OTA/Google Flights sourceUrl without toolTrace. Only verified+sourceUrl options may carry concrete prices; schedules from the provider use estimated+flight_schedule.
 - Do NOT emit quotedFact or sourceTitle.
 - Do NOT convert currencies; do NOT invent transport modes or "suspendido/confirmado" without evidence.
-- User-stated goals (serenata, feria, grito): ALWAYS add an itineraryItem (and optionally type=event shortlisted) on the stated date with notes "objetivo del viajero — pendiente de verificar con fuente actual". Never claim it as confirmed without toolTrace evidence. Narrative must distinguish verified vs estimated.
+- User-stated goals (serenata, feria, grito, fiestas patronales): ALWAYS keep the INTENT as an itineraryItem (and optionally type=event) with notes "objetivo del viajero — pendiente de verificar con fuente actual". Distinguir: (1) intención del viajero ≠ (2) hecho fechado verificado. NEVER invent or remap a concrete event calendar day (e.g. "serenata el 27", "fiestas el 26") just because the trip window moved weekend-to-weekend. Only set startAt / dated titles for external events when the SAME dated fact is already in TripContextSnapshot with sufficient provenance OR toolTrace webSearch/fetchUrl evidence in THIS turn supports that date. Otherwise omit startAt, use fecha tentativa / pending, and do not affirm the event occurs that day. Narrative must distinguish verified vs estimated vs pending.
+- MUTATION date shifts: moving trip dates does NOT authorize copying an old verified/unverified event day onto the "same weekday" of the new window without fresh evidence.
 
 NEW_TRAVEL PIPELINE (when INTENT=new_travel)
 1. Parse origin, destination(s), preferred dates, alternatives, and goals from the prompt.
@@ -111,6 +112,7 @@ export function buildFinalProposalPrompt(
     'Context claims allowed when citing Dexie fields.',
     'Do NOT convert currencies or infer taxi/Uber/suspensión without explicit evidence.',
     'If the user asked for flights on a specific date: do NOT claim weekly/monthly route statistics. Prefer empty claims[] + honest narrative when day-specific schedules are missing.',
+    'External events (serenata/fiestas/festival): do NOT remap an old event day onto the new trip weekend without toolTrace/context evidence for THAT date. Keep user intent as pendiente/fecha tentativa without affirming a concrete calendar day.',
     ...base,
   ].join('\n')
 }

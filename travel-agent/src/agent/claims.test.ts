@@ -728,7 +728,11 @@ describe('day-specific flight ask vs weekly aggregate', () => {
       g.draft.package as { itineraryItems: Array<Record<string, unknown>> }
     ).itineraryItems[0]!
     assert.equal(itin.startAt, undefined)
-    assert.match(String(itin.notes), /2026-09-20/)
+    // External event dates without web/context evidence must not remain as
+    // Fecha asociada pins — demote to pending / fecha tentativa.
+    assert.doesNotMatch(String(itin.notes), /2026-09-20/)
+    assert.match(String(itin.notes), /pendiente de verificar/i)
+    assert.match(String(itin.title), /serenata/i)
   })
 
   it('new_travel skeleton drops invalid evidenceIndex claims instead of failing closed', () => {
