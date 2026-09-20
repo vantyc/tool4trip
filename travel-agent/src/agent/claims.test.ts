@@ -805,3 +805,365 @@ describe('day-specific flight ask vs weekly aggregate', () => {
     assert.equal(w2.length, 0)
   })
 })
+
+describe('Ask Travel searchFlightSchedules context grounding', () => {
+  const checkedAt = '2026-09-20T18:00:00+00:00'
+  const scheduleUrl2 =
+    'https://aerodatabox.com/?origin=MEX&destination=GDL&date=2026-09-20&flight=AM212'
+  const scheduleUrl3 =
+    'https://aerodatabox.com/?origin=MEX&destination=GDL&date=2026-09-20&flight=Y4152'
+  const scheduleUrl4 =
+    'https://aerodatabox.com/?origin=MEX&destination=GDL&date=2026-09-20&flight=AM222'
+
+  function scheduleTrace(): ToolTraceEntry[] {
+    return [
+      {
+        tool: 'searchFlightSchedules',
+        args: {
+          origin: 'MEX',
+          destination: 'GDL',
+          date: '2026-09-20',
+          provider: 'aerodatabox',
+          flights: [
+            {
+              origin: 'MEX',
+              destination: 'GDL',
+              departureAt: '2026-09-20T11:30:00-06:00',
+              arrivalAt: '2026-09-20T12:55:00-06:00',
+              carrierCode: 'AM',
+              carrierName: 'Aeromexico',
+              flightNumber: 'AM212',
+              sourceUrl: scheduleUrl2,
+              checkedAt,
+            },
+            {
+              origin: 'MEX',
+              destination: 'GDL',
+              departureAt: '2026-09-20T13:00:00-06:00',
+              arrivalAt: '2026-09-20T14:25:00-06:00',
+              carrierCode: 'Y4',
+              carrierName: 'Volaris',
+              flightNumber: 'Y4152',
+              sourceUrl: scheduleUrl3,
+              checkedAt,
+            },
+            {
+              origin: 'MEX',
+              destination: 'GDL',
+              departureAt: '2026-09-20T14:30:00-06:00',
+              arrivalAt: '2026-09-20T15:55:00-06:00',
+              carrierCode: 'AM',
+              carrierName: 'Aeromexico',
+              flightNumber: 'AM222',
+              sourceUrl: scheduleUrl4,
+              checkedAt,
+            },
+          ],
+        },
+        ok: true,
+        sources: [
+          { url: scheduleUrl2, title: 'AM AM212 MEX→GDL', snippet: 'dep 2026-09-20T11:30:00-06:00' },
+          { url: scheduleUrl3, title: 'Y4 Y4152 MEX→GDL', snippet: 'dep 2026-09-20T13:00:00-06:00' },
+          { url: scheduleUrl4, title: 'AM AM222 MEX→GDL', snippet: 'dep 2026-09-20T14:30:00-06:00' },
+        ],
+        checkedAt,
+      },
+    ]
+  }
+
+  function emptyAskContext(): AgentAskRequest['context'] {
+    return {
+      trip: {
+        id: 'trip-ask-1',
+        title: 'Viaje existente',
+        startDate: '2026-09-20',
+        endDate: '2026-09-22',
+        timezone: 'America/Mexico_City',
+        status: 'planned',
+        goals: [],
+      },
+      bookings: [],
+      travelOptions: [],
+      itineraryItems: [],
+      checklistItems: [],
+      notes: [],
+      packageImports: [],
+    }
+  }
+
+  function packageWithOutboundFlights() {
+    return {
+      schemaVersion: 1,
+      packageId: 'agent-trip-ask-1',
+      revision: 1,
+      trip: {
+        id: 'trip-ask-1',
+        title: 'Viaje existente',
+        startDate: '2026-09-20',
+        endDate: '2026-09-22',
+        timezone: 'America/Mexico_City',
+        goals: [],
+        status: 'planned',
+      },
+      travelOptions: [
+        {
+          externalId: 'outbound-flight-2',
+          type: 'flight',
+          status: 'researched',
+          title: 'AM212 MEX→GDL 11:30',
+          provider: 'Aeromexico',
+          origin: 'MEX',
+          destination: 'GDL',
+          startAt: '2026-09-20T11:30:00-06:00',
+          endAt: '2026-09-20T12:55:00-06:00',
+          verificationStatus: 'estimated',
+          sourceType: 'agent',
+        },
+        {
+          externalId: 'outbound-flight-3',
+          type: 'flight',
+          status: 'researched',
+          title: 'Y4152 MEX→GDL 13:00',
+          provider: 'Volaris',
+          origin: 'MEX',
+          destination: 'GDL',
+          startAt: '2026-09-20T13:00:00-06:00',
+          endAt: '2026-09-20T14:25:00-06:00',
+          verificationStatus: 'estimated',
+          sourceType: 'agent',
+        },
+        {
+          externalId: 'outbound-flight-4',
+          type: 'flight',
+          status: 'researched',
+          title: 'AM222 MEX→GDL 14:30',
+          provider: 'Aeromexico',
+          origin: 'MEX',
+          destination: 'GDL',
+          startAt: '2026-09-20T14:30:00-06:00',
+          endAt: '2026-09-20T15:55:00-06:00',
+          verificationStatus: 'estimated',
+          sourceType: 'agent',
+        },
+      ],
+      itineraryItems: [],
+      checklistItems: [],
+      notes: [],
+    }
+  }
+
+  it('reproduces context_entity_missing without schedule registration (baseline)', () => {
+    // Direct validateClaimsAgainstToolTrace WITHOUT augment — exact failure mode
+    const result = validateClaimsAgainstToolTrace(
+      [
+        {
+          kind: 'schedule',
+          statement: 'AM212 MEX→GDL 11:30',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'outbound-flight-2',
+          field: 'title',
+          verificationStatus: 'estimated',
+          confidence: 'high',
+        },
+        {
+          kind: 'schedule',
+          statement: 'Y4152 MEX→GDL 13:00',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'outbound-flight-3',
+          field: 'title',
+          verificationStatus: 'estimated',
+          confidence: 'high',
+        },
+        {
+          kind: 'schedule',
+          statement: 'AM222 MEX→GDL 14:30',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'outbound-flight-4',
+          field: 'title',
+          verificationStatus: 'estimated',
+          confidence: 'high',
+        },
+      ],
+      scheduleTrace(),
+      emptyAskContext(),
+    )
+    assert.equal(result.valid.length, 0)
+    assert.equal(result.invalid.length, 3)
+    for (const v of result.invalid) {
+      assert.equal(v.code, 'context_entity_missing')
+      assert.match(v.message, /outbound-flight-[234] not in context/)
+    }
+  })
+
+  it('Ask Travel: schedule-backed package options ground context claims (no bypass)', () => {
+    const draft = {
+      narrative: 'Opciones de horario publicado MEX→GDL el 20 sep 2026 entre 11:00 y 15:00.',
+      warnings: [],
+      diffSummary: [],
+      ops: [],
+      claims: [
+        {
+          kind: 'schedule',
+          statement: 'AM212 MEX→GDL 11:30',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'outbound-flight-2',
+          field: 'title',
+          verificationStatus: 'estimated',
+          confidence: 'high',
+        },
+        {
+          kind: 'schedule',
+          statement: 'Y4152 MEX→GDL 13:00',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'outbound-flight-3',
+          field: 'title',
+          verificationStatus: 'estimated',
+          confidence: 'high',
+        },
+        {
+          kind: 'schedule',
+          statement: 'AM222 MEX→GDL 14:30',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'outbound-flight-4',
+          field: 'title',
+          verificationStatus: 'estimated',
+          confidence: 'high',
+        },
+      ],
+      package: packageWithOutboundFlights(),
+    }
+    const g = assertDraftGrounded(draft, scheduleTrace(), emptyAskContext(), {
+      allowSkeletonPackage: false,
+      userPrompt:
+        'Vuelos directos MEX a GDL el 2026-09-20 entre las 11:00 y las 15:00',
+    })
+    assert.equal(g.ok, true, g.ok ? '' : JSON.stringify(g))
+    if (!g.ok) throw new Error('expected ok')
+    assert.equal(g.validClaims.length, 3)
+    const opts = (
+      g.draft.package as { travelOptions: Array<Record<string, unknown>> }
+    ).travelOptions
+    for (const id of [
+      'outbound-flight-2',
+      'outbound-flight-3',
+      'outbound-flight-4',
+    ]) {
+      const o = opts.find((x) => x.externalId === id)!
+      assert.equal(o.sourceType, 'flight_schedule')
+      assert.equal(o.verificationStatus, 'estimated')
+      assert.ok(typeof o.startAt === 'string' && /T\d{2}:\d{2}/.test(o.startAt))
+      assert.ok(typeof o.sourceUrl === 'string' && /^https?:\/\//.test(o.sourceUrl))
+      assert.match(String(o.notes), /HORARIO PUBLICADO/)
+    }
+  })
+
+  it('fabricated flight context claim still fails context_entity_missing', () => {
+    const draft = {
+      narrative: 'Invented flight',
+      warnings: [],
+      diffSummary: [],
+      ops: [],
+      claims: [
+        {
+          kind: 'schedule',
+          statement: 'ZZ999 MEX→GDL 12:00',
+          sourceType: 'context',
+          entityType: 'travelOption',
+          entityId: 'outbound-flight-fake',
+          field: 'title',
+          verificationStatus: 'estimated',
+          confidence: 'high',
+        },
+      ],
+      package: {
+        ...packageWithOutboundFlights(),
+        travelOptions: [
+          {
+            externalId: 'outbound-flight-fake',
+            type: 'flight',
+            status: 'researched',
+            title: 'ZZ999 MEX→GDL 12:00',
+            provider: 'FakeAir',
+            origin: 'MEX',
+            destination: 'GDL',
+            // Clock NOT in searchFlightSchedules results
+            startAt: '2026-09-20T12:00:00-06:00',
+            endAt: '2026-09-20T13:20:00-06:00',
+            verificationStatus: 'estimated',
+            sourceType: 'agent',
+          },
+        ],
+      },
+    }
+    const g = assertDraftGrounded(draft, scheduleTrace(), emptyAskContext(), {
+      allowSkeletonPackage: false,
+    })
+    assert.equal(g.ok, false)
+    if (g.ok) throw new Error('expected fail')
+    assert.equal(g.code, 'ungrounded_claims')
+    assert.ok(
+      g.violations.some(
+        (v) =>
+          v.code === 'context_entity_missing' &&
+          /outbound-flight-fake/.test(v.message),
+      ),
+      JSON.stringify(g.violations),
+    )
+  })
+
+  it('webSearch grounding still requires toolTrace sourceUrl (unchanged)', () => {
+    const draft = {
+      narrative: 'Hotel',
+      warnings: [],
+      diffSummary: [],
+      ops: [],
+      claims: [
+        {
+          kind: 'other_factual',
+          statement: 'Hotel centro',
+          sourceType: 'web',
+          sourceUrl: 'https://example.com/hotel-not-in-trace',
+          evidenceIndex: 0,
+          verificationStatus: 'verified',
+          confidence: 'high',
+        },
+      ],
+      package: {
+        schemaVersion: 1,
+        packageId: 'p',
+        revision: 1,
+        trip: {
+          id: 't',
+          title: 't',
+          startDate: '2026-09-20',
+          endDate: '2026-09-22',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        travelOptions: [],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+      },
+    }
+    const g = assertDraftGrounded(
+      draft,
+      scheduleTrace(),
+      emptyAskContext(),
+      { allowSkeletonPackage: false },
+    )
+    assert.equal(g.ok, false)
+    if (g.ok) throw new Error('expected fail')
+    assert.ok(
+      g.violations.some((v) => v.code === 'source_url_missing'),
+      JSON.stringify(g.violations),
+    )
+  })
+})

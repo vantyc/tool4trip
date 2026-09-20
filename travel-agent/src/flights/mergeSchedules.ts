@@ -1,4 +1,5 @@
 import type { ToolTraceEntry } from '../../shared/agentContracts.ts'
+import type { TripContextSnapshot } from '../../shared/agentContracts.ts'
 import { PUBLISHED_SCHEDULE_NOTE } from './types.ts'
 
 type Rec = Record<string, unknown>
@@ -11,7 +12,7 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
 }
 
-type TraceSchedule = {
+export type TraceSchedule = {
   origin: string
   destination: string
   departureAt: string
@@ -23,7 +24,9 @@ type TraceSchedule = {
   checkedAt: string
 }
 
-function parseSchedulesFromTrace(toolTrace: ToolTraceEntry[]): TraceSchedule[] {
+export function parseSchedulesFromTrace(
+  toolTrace: ToolTraceEntry[],
+): TraceSchedule[] {
   const out: TraceSchedule[] = []
   for (const t of toolTrace) {
     if (t.tool !== 'searchFlightSchedules' || !t.ok) continue
@@ -49,7 +52,8 @@ function parseSchedulesFromTrace(toolTrace: ToolTraceEntry[]): TraceSchedule[] {
           sourceUrl:
             str(f.sourceUrl) ||
             `https://aerodatabox.com/?origin=${origin}&destination=${destination}`,
-          checkedAt: str(f.checkedAt) || str(t.checkedAt) || new Date().toISOString(),
+          checkedAt:
+            str(f.checkedAt) || str(t.checkedAt) || new Date().toISOString(),
         })
       }
       continue
@@ -92,6 +96,145 @@ function parseSchedulesFromTrace(toolTrace: ToolTraceEntry[]): TraceSchedule[] {
     }
   }
   return out
+}
+
+/** Normalize ISO clock to minute precision for matching. */
+export function scheduleClockKey(iso: string): string {
+  const m = iso.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/)
+  return m ? `${m[1]}T${m[2]}:${m[3]}` : iso.trim()
+}
+
+/**
+ * True when a package flight option is backed by a published schedule in toolTrace
+ * (route + departure clock). Fabricated clocks/routes that are absent from
+ * searchFlightSchedules do not match.
+ */
+export function optionMatchesPublishedSchedule(
+  opt: Rec,
+  schedules: TraceSchedule[],
+): TraceSchedule | null {
+  if (str(opt.type) !== 'flight') return null
+  const startAt = str(opt.startAt)
+  if (!/T\d{2}:\d{2}/.test(startAt)) return null
+  const startKey = scheduleClockKey(startAt)
+  const originBlob = str(opt.origin).toUpperCase()
+  const destBlob = str(opt.destination).toUpperCase()
+
+  for (const s of schedules) {
+    if (scheduleClockKey(s.departureAt) !== startKey) continue
+    if (!originBlob.includes(s.origin) || !destBlob.includes(s.destination)) {
+      continue
+    }
+    return s
+  }
+  return null
+}
+
+/**
+ * Stamp package flight options that match searchFlightSchedules with
+ * flight_schedule provenance (does not invent options or clocks).
+ */
+export function stampProvenScheduleOptions(
+  pkgIn: unknown,
+  toolTrace: ToolTraceEntry[],
+): { package: Rec; stampedExternalIds: string[] } {
+  const pkg = { ...asRec(pkgIn) }
+  const schedules = parseSchedulesFromTrace(toolTrace)
+  const stampedExternalIds: string[] = []
+  if (!schedules.length || !Array.isArray(pkg.travelOptions)) {
+    return { package: pkg, stampedExternalIds }
+  }
+  pkg.travelOptions = (pkg.travelOptions as unknown[]).map((raw) => {
+    const o = asRec(raw)
+    const match = optionMatchesPublishedSchedule(o, schedules)
+    if (!match) return raw
+    const externalId = str(o.externalId)
+    if (externalId) stampedExternalIds.push(externalId)
+    const notes = [str(o.notes), PUBLISHED_SCHEDULE_NOTE]
+      .filter(Boolean)
+      .join(' ')
+    return {
+      ...o,
+      sourceType: 'flight_schedule',
+      verificationStatus:
+        str(o.verificationStatus) === 'verified'
+          ? 'estimated'
+          : str(o.verificationStatus) || 'estimated',
+      sourceUrl: str(o.sourceUrl) || match.sourceUrl,
+      checkedAt: str(o.checkedAt) || match.checkedAt,
+      provider:
+        str(o.provider) || match.carrierName || match.carrierCode || undefined,
+      endAt: str(o.endAt) || match.arrivalAt || undefined,
+      notes,
+    }
+  })
+  return { package: pkg, stampedExternalIds }
+}
+
+/**
+ * Register schedule-proven package travelOptions into a grounding context so
+ * context claims citing their externalId/id resolve — without accepting
+ * fabricated flights that lack toolTrace schedule evidence.
+ */
+export function augmentContextWithProvenFlightSchedules(
+  context: TripContextSnapshot | undefined,
+  draftPackage: unknown,
+  toolTrace: ToolTraceEntry[],
+): TripContextSnapshot | undefined {
+  if (!context) return context
+  const schedules = parseSchedulesFromTrace(toolTrace)
+  if (!schedules.length) return context
+  const pkg = asRec(draftPackage)
+  const packageId = str(pkg.packageId)
+  const options = Array.isArray(pkg.travelOptions)
+    ? (pkg.travelOptions as unknown[])
+    : []
+  const extras: Rec[] = []
+  const seen = new Set<string>()
+  const push = (row: Rec) => {
+    const id = str(row.id)
+    const ext = str(row.externalId)
+    const key = `${id}|${ext}`
+    if (seen.has(key)) return
+    seen.add(key)
+    extras.push(row)
+  }
+
+  for (const raw of options) {
+    const o = asRec(raw)
+    const match = optionMatchesPublishedSchedule(o, schedules)
+    if (!match) continue
+    const externalId = str(o.externalId)
+    if (!externalId) continue
+    const base: Rec = {
+      ...o,
+      id: externalId,
+      externalId,
+      type: 'flight',
+      title: str(o.title) || `${match.origin}→${match.destination}`,
+      startAt: str(o.startAt) || match.departureAt,
+      endAt: str(o.endAt) || match.arrivalAt || undefined,
+      origin: str(o.origin) || match.origin,
+      destination: str(o.destination) || match.destination,
+      provider:
+        str(o.provider) || match.carrierName || match.carrierCode || undefined,
+      sourceType: 'flight_schedule',
+      verificationStatus: 'estimated',
+      sourceUrl: str(o.sourceUrl) || match.sourceUrl,
+      checkedAt: str(o.checkedAt) || match.checkedAt,
+      notes: [str(o.notes), PUBLISHED_SCHEDULE_NOTE].filter(Boolean).join(' '),
+    }
+    push(base)
+    if (packageId) {
+      push({ ...base, id: `opt-${packageId}-${externalId}` })
+    }
+  }
+
+  if (!extras.length) return context
+  return {
+    ...context,
+    travelOptions: [...(context.travelOptions ?? []), ...extras],
+  }
 }
 
 function routeMatches(opt: Rec, origin: string, destination: string): boolean {

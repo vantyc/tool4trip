@@ -37,6 +37,7 @@ GROUNDING (mandatory)
 - Web claims: sourceType=web, sourceUrl, evidenceIndex (server derives quotedFact from toolTrace).
 - Context claims: sourceType=context, entityType, entityId, field. Do NOT invent sourceUrl.
 - For entityId, use the entity's id field from TripContextSnapshot (e.g. travelOption.id). Do not invent ids.
+- For NEW flight options from searchFlightSchedules: put them in package.travelOptions with stable externalId (e.g. outbound-flight-2), startAt/endAt from the tool result, sourceType=flight_schedule, sourceUrl from the tool. Context claims may cite that same externalId as entityId — the server registers schedule-proven package options into grounding context. Do NOT cite fabricated flight ids that are not in the package and not backed by searchFlightSchedules clocks/route.
 - Skeleton flight/lodging: prefer empty claims; put route/city details in package with verificationStatus=estimated and OMIT priceObserved, startAt, and endAt (no invented clocks, fares, or availability). Exception: clocks from searchFlightSchedules may be set with sourceType=flight_schedule, verificationStatus=estimated, https sourceUrl, and HORARIO PUBLICADO notes (schedule ≠ availability). Do NOT invent OTA/Google Flights sourceUrl without toolTrace. Only verified+sourceUrl options may carry concrete prices; schedules from the provider use estimated+flight_schedule.
 - Do NOT emit quotedFact or sourceTitle.
 - Do NOT convert currencies; do NOT invent transport modes or "suspendido/confirmado" without evidence.

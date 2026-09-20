@@ -1,5 +1,9 @@
 import { z } from 'zod'
 import type { ToolTraceEntry } from '../../shared/agentContracts.ts'
+import {
+  augmentContextWithProvenFlightSchedules,
+  stampProvenScheduleOptions,
+} from '../flights/mergeSchedules.ts'
 import { scrubUnsupportedFreeTextAssertions } from './researchCoverage.ts'
 
 /**
@@ -1307,10 +1311,30 @@ export function assertDraftGrounded(
     }
   }
 
+  // Register schedule-backed package flights into grounding context BEFORE
+  // validating context claims (Ask Travel: options exist in package but not
+  // yet in Dexie TripContextSnapshot). Fabricated flights without toolTrace
+  // schedule evidence are NOT registered.
+  const stampWarnings: string[] = []
+  if (draft.package && typeof draft.package === 'object') {
+    const stamped = stampProvenScheduleOptions(draft.package, toolTrace)
+    draft.package = stamped.package
+    if (stamped.stampedExternalIds.length) {
+      stampWarnings.push(
+        `server: ${stamped.stampedExternalIds.length} travelOption(s) stamped flight_schedule from searchFlightSchedules (${stamped.stampedExternalIds.join(', ')}).`,
+      )
+    }
+  }
+  const groundingContext = augmentContextWithProvenFlightSchedules(
+    context,
+    draft.package,
+    toolTrace,
+  )
+
   const { valid: validated, invalid } = validateClaimsAgainstToolTrace(
     llmClaims,
     toolTrace,
-    context,
+    groundingContext,
   )
   if (invalid.length || (parseViolations.length && opts?.allowSkeletonPackage)) {
     const warnings = [
@@ -1345,6 +1369,7 @@ export function assertDraftGrounded(
       const dropNote = `server: ${dropped} claim(s) descartado(s) por grounding (skeleton); no se promocionan a verified.`
       draft.warnings = [
         ...prev,
+        ...stampWarnings,
         dropNote,
         ...warnings,
         ...concreteWarnings,
@@ -1354,6 +1379,7 @@ export function assertDraftGrounded(
         ok: true,
         validClaims: valid,
         serverWarnings: [
+          ...stampWarnings,
           ...filtered.warnings,
           dropNote,
           ...warnings,
@@ -1392,7 +1418,7 @@ export function assertDraftGrounded(
     return {
       ok: true,
       validClaims: valid,
-      serverWarnings: aggregateWarnings,
+      serverWarnings: [...stampWarnings, ...aggregateWarnings],
       draft,
     }
   }
@@ -1413,11 +1439,17 @@ export function assertDraftGrounded(
     const prev = (draft.warnings as unknown[]).filter(
       (w): w is string => typeof w === 'string' && w.trim().length > 0,
     )
-    draft.warnings = [...prev, ...concreteWarnings, ...freeTextWarnings]
+    draft.warnings = [
+      ...prev,
+      ...stampWarnings,
+      ...concreteWarnings,
+      ...freeTextWarnings,
+    ]
     return {
       ok: true,
       validClaims: valid,
       serverWarnings: [
+        ...stampWarnings,
         ...aggregateWarnings,
         ...concreteWarnings,
         ...freeTextWarnings,
@@ -1430,7 +1462,11 @@ export function assertDraftGrounded(
     draft,
     valid,
   )
-  const allServerWarnings = [...aggregateWarnings, ...serverWarnings]
+  const allServerWarnings = [
+    ...stampWarnings,
+    ...aggregateWarnings,
+    ...serverWarnings,
+  ]
 
   const signals = collectAllOperationalSignals(rewritten)
   const uncovered = signals.filter((sig) => {
