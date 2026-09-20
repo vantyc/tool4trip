@@ -379,6 +379,18 @@ function isBlank(v: unknown): boolean {
   return v === undefined || v === null || (typeof v === 'string' && !v.trim())
 }
 
+/** Proposed text with U+0000 is treated as degraded (prefer current). */
+function preferText(
+  proposed: string | undefined,
+  current: string | undefined,
+): string | undefined {
+  if (proposed !== undefined && proposed.includes('\u0000')) {
+    return current ?? proposed.replaceAll('\u0000', '')
+  }
+  if (!isBlank(proposed)) return proposed
+  return current
+}
+
 function isPlaceholderTitle(title: string): boolean {
   return !title.trim() || PLACEHOLDER_TITLE.test(title.trim())
 }
@@ -416,10 +428,13 @@ export function mergePreservedPackageOption(
     (Boolean(propEnd) && !curEnd)
 
   const title =
-    isPlaceholderTitle(proposed.title) && !isPlaceholderTitle(current.title)
+    (isPlaceholderTitle(proposed.title) || proposed.title.includes('\u0000')) &&
+    !isPlaceholderTitle(current.title)
       ? current.title
       : proposed.title.trim()
-        ? proposed.title
+        ? proposed.title.includes('\u0000')
+          ? proposed.title.replaceAll('\u0000', '')
+          : proposed.title
         : current.title
 
   const startAt = explicitTemporal
@@ -438,28 +453,18 @@ export function mergePreservedPackageOption(
         proposed.sourceType ??
         'agent')
 
-  const sourceUrl = !isBlank(proposed.sourceUrl)
-    ? proposed.sourceUrl
-    : current.sourceUrl
-  const provider = !isBlank(proposed.provider)
-    ? proposed.provider
-    : current.provider
-  const checkedAt = !isBlank(proposed.checkedAt)
-    ? proposed.checkedAt
-    : current.checkedAt
+  const sourceUrl = preferText(proposed.sourceUrl, current.sourceUrl)
+  const provider = preferText(proposed.provider, current.provider)
+  const checkedAt = preferText(proposed.checkedAt, current.checkedAt)
   const verificationStatus =
     proposed.verificationStatus ?? current.verificationStatus
 
-  const origin = !isBlank(proposed.origin) ? proposed.origin : current.origin
-  const destination = !isBlank(proposed.destination)
-    ? proposed.destination
-    : current.destination
-  const address = !isBlank(proposed.address) ? proposed.address : current.address
-  const phone = !isBlank(proposed.phone) ? proposed.phone : current.phone
-  const description = !isBlank(proposed.description)
-    ? proposed.description
-    : current.description
-  const notes = !isBlank(proposed.notes) ? proposed.notes : current.notes
+  const origin = preferText(proposed.origin, current.origin)
+  const destination = preferText(proposed.destination, current.destination)
+  const address = preferText(proposed.address, current.address)
+  const phone = preferText(proposed.phone, current.phone)
+  const description = preferText(proposed.description, current.description)
+  const notes = preferText(proposed.notes, current.notes)
 
   const status =
     proposed.status === 'shortlisted' || proposed.status === 'researched'

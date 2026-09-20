@@ -10,6 +10,7 @@ import type {
   Trip,
 } from './domainTypes.ts'
 import { DEFAULT_WORKSPACE } from './schema.ts'
+import { stringifyPayloadForPostgres } from './postgresSanitize.ts'
 
 type Queryable = Pick<pg.Pool, 'query'> | pg.PoolClient
 
@@ -83,6 +84,19 @@ async function putEntity(
     }
   }
 
+  const payloadJson = stringifyPayloadForPostgres(payload, {
+    collection: table,
+    entityId: id,
+    tripId,
+    externalId:
+      payload &&
+      typeof payload === 'object' &&
+      'externalId' in payload &&
+      typeof (payload as { externalId?: unknown }).externalId === 'string'
+        ? (payload as { externalId: string }).externalId
+        : undefined,
+  })
+
   if (table === 'travel_options') {
     await db.query(
       `INSERT INTO travel_options (id, workspace, trip_id, package_id, payload, updated_at)
@@ -97,7 +111,7 @@ async function putEntity(
         workspace,
         tripId,
         extra?.packageId ?? null,
-        JSON.stringify(payload),
+        payloadJson,
         asUpdatedAt(updatedAt),
       ],
     )
@@ -118,7 +132,7 @@ async function putEntity(
         workspace,
         tripId,
         extra?.itineraryItemId ?? null,
-        JSON.stringify(payload),
+        payloadJson,
         asUpdatedAt(updatedAt),
       ],
     )
@@ -132,7 +146,7 @@ async function putEntity(
        trip_id = EXCLUDED.trip_id,
        payload = EXCLUDED.payload,
        updated_at = EXCLUDED.updated_at`,
-    [id, workspace, tripId, JSON.stringify(payload), asUpdatedAt(updatedAt)],
+    [id, workspace, tripId, payloadJson, asUpdatedAt(updatedAt)],
   )
 }
 
@@ -185,7 +199,16 @@ export const store = {
        ON CONFLICT (id) DO UPDATE SET
          payload = EXCLUDED.payload,
          updated_at = EXCLUDED.updated_at`,
-      [synced.id, workspace, JSON.stringify(synced), synced.updatedAt],
+      [
+        synced.id,
+        workspace,
+        stringifyPayloadForPostgres(synced, {
+          collection: 'trips',
+          entityId: synced.id,
+          tripId: synced.id,
+        }),
+        synced.updatedAt,
+      ],
     )
     return synced
   },

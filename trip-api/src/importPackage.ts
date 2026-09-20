@@ -32,6 +32,10 @@ import {
   type ParsedImportBody,
 } from './packageMutation.ts'
 import { compileMutationPlan } from './compileMutationPlan.ts'
+import {
+  logPostgresSanitize,
+  sanitizeForPostgres,
+} from './postgresSanitize.ts'
 import type { AgentOpRecord } from '../../shared/agentContracts.ts'
 import { store } from './store.ts'
 
@@ -206,6 +210,18 @@ export async function importPackage(
     }
     pkg = enrichTripPackageAirportArrivals(compiled.package)
     opsForApply = compiled.ops
+  }
+
+  // Pre-write: make the full mutation package PostgreSQL-safe before any upserts.
+  {
+    const sanitized = sanitizeForPostgres(pkg, '$.package')
+    if (sanitized.changed) {
+      logPostgresSanitize(
+        { collection: 'import-package', tripId, entityId: pkg.packageId },
+        sanitized.events,
+      )
+      pkg = sanitized.value
+    }
   }
 
   // Validate compiled (or legacy) ops BEFORE any writes (atomic fail-closed).
