@@ -8,6 +8,10 @@ import {
 } from './packageMutation.ts'
 import type { TravelOption, Trip } from './domainTypes.ts'
 import {
+  containsDisallowedControl,
+  stripDisallowedControls,
+} from './postgresSanitize.ts'
+import {
   checklistEntityId,
   itineraryEntityId,
   noteEntityId,
@@ -379,18 +383,6 @@ function isBlank(v: unknown): boolean {
   return v === undefined || v === null || (typeof v === 'string' && !v.trim())
 }
 
-/** Proposed text with U+0000 is treated as degraded (prefer current). */
-function preferText(
-  proposed: string | undefined,
-  current: string | undefined,
-): string | undefined {
-  if (proposed !== undefined && proposed.includes('\u0000')) {
-    return current ?? proposed.replaceAll('\u0000', '')
-  }
-  if (!isBlank(proposed)) return proposed
-  return current
-}
-
 function isPlaceholderTitle(title: string): boolean {
   return !title.trim() || PLACEHOLDER_TITLE.test(title.trim())
 }
@@ -404,17 +396,147 @@ const WEAK_SOURCE: Record<string, number> = {
   flight_schedule: 4,
 }
 
+export type MergePreserveOpts = {
+  allowTemporalReplace?: boolean
+  /**
+   * Explicit field mask (from structured patches / known intent).
+   * Without a mask, Ask Travel package reuse of externalId does NOT imply
+   * authority to overwrite owned text fields on an existing entity.
+   */
+  changedFields?: readonly string[]
+}
+
+function fieldExplicitlyChanged(
+  field: string,
+  changedFields: readonly string[] | undefined,
+): boolean {
+  return Boolean(changedFields?.includes(field))
+}
+
+function cleanProposedText(proposed: string | undefined): string | undefined {
+  if (proposed === undefined || proposed === null) return proposed
+  if (!containsDisallowedControl(proposed)) return proposed
+  return stripDisallowedControls(proposed).value
+}
+
+/**
+ * Prefer current when proposed is blank or control-degraded.
+ * Used only for fields that are allowed to take proposed values.
+ */
+function preferCleanText(
+  proposed: string | undefined,
+  current: string | undefined,
+): string | undefined {
+  if (proposed !== undefined && containsDisallowedControl(proposed)) {
+    if (!isBlank(current) && !containsDisallowedControl(current)) {
+      return current
+    }
+    const cleaned = stripDisallowedControls(proposed).value
+    return isBlank(cleaned) ? current : cleaned
+  }
+  if (!isBlank(proposed)) return proposed
+  return current
+}
+
+function allowsFlightScheduleProvenance(type: string): boolean {
+  return type === 'flight'
+}
+
+/**
+ * Structural provenance invariant: flight_schedule ownership is flight-only.
+ * Transfer/lodging must not inherit flight_schedule sourceType/url/checkedAt.
+ */
+function applyProvenanceInvariants(
+  entityType: string,
+  sourceType: PackageTravelOption['sourceType'] | undefined,
+  sourceUrl: string | undefined,
+  checkedAt: string | undefined,
+  current: TravelOption,
+): {
+  sourceType: PackageTravelOption['sourceType']
+  sourceUrl: string | undefined
+  checkedAt: string | undefined
+} {
+  if (
+    sourceType === 'flight_schedule' &&
+    !allowsFlightScheduleProvenance(entityType)
+  ) {
+    return {
+      sourceType:
+        (current.sourceType as PackageTravelOption['sourceType']) ?? 'agent',
+      sourceUrl: current.sourceUrl,
+      checkedAt: current.checkedAt,
+    }
+  }
+  return {
+    sourceType: sourceType ?? 'agent',
+    sourceUrl,
+    checkedAt,
+  }
+}
+
+/**
+ * Scrub a brand-new package option (no current entity): strip disallowed
+ * controls and reject flight_schedule provenance on non-flight types.
+ */
+export function scrubNewPackageOption(
+  proposed: PackageTravelOption,
+): PackageTravelOption {
+  const title = cleanProposedText(proposed.title)?.trim() || proposed.title
+  const entityType = proposed.type || 'other'
+  let sourceType = proposed.sourceType ?? 'agent'
+  let sourceUrl = cleanProposedText(proposed.sourceUrl)
+  let checkedAt = cleanProposedText(proposed.checkedAt)
+  if (
+    sourceType === 'flight_schedule' &&
+    !allowsFlightScheduleProvenance(entityType)
+  ) {
+    sourceType = 'agent'
+    sourceUrl = undefined
+    checkedAt = undefined
+  }
+  return {
+    ...proposed,
+    title,
+    provider: cleanProposedText(proposed.provider),
+    description: cleanProposedText(proposed.description),
+    origin: cleanProposedText(proposed.origin),
+    destination: cleanProposedText(proposed.destination),
+    address: cleanProposedText(proposed.address),
+    phone: cleanProposedText(proposed.phone),
+    notes: cleanProposedText(proposed.notes),
+    sourceUrl,
+    checkedAt,
+    sourceType,
+  }
+}
+
 /**
  * Merge proposed fields onto a conserved current entity.
- * Degraded / missing proposal fields never wipe persisted identity, temporal,
- * or provenance data unless the proposal carries an explicit replacement.
+ *
+ * Field ownership (preserve-by-default):
+ * - Owned text (notes/description/address/phone): keep current unless the
+ *   field is listed in changedFields. Blank current stays blank.
+ * - Title: keep current unless changedFields includes title, or current is
+ *   blank/placeholder and proposed is a clean non-placeholder.
+ * - Route (origin/destination): keep current unless changedFields or current blank.
+ * - Provenance: structured strength upgrade for flights only; never attach
+ *   flight_schedule to transfer/lodging.
+ * - Temporal: unchanged rules via allowTemporalReplace / explicit date delta.
+ *
+ * Control-degraded proposed text never beats clean current. No attempt is made
+ * to map U+0015→"—"/U+0018→"·".
  */
 export function mergePreservedPackageOption(
   current: TravelOption,
   proposed: PackageTravelOption,
-  opts?: { allowTemporalReplace?: boolean },
+  opts?: MergePreserveOpts,
 ): PackageTravelOption {
   const allowTemporal = opts?.allowTemporalReplace ?? false
+  const changedFields = opts?.changedFields
+  const entityType =
+    proposed.type || (current.type as PackageTravelOption['type'])
+
   const curStart = datePrefix(current.startAt)
   const propStart = datePrefix(proposed.startAt)
   const curEnd = datePrefix(current.endAt)
@@ -422,20 +544,57 @@ export function mergePreservedPackageOption(
 
   const explicitTemporal =
     allowTemporal ||
+    fieldExplicitlyChanged('startAt', changedFields) ||
+    fieldExplicitlyChanged('endAt', changedFields) ||
     (Boolean(propStart) && Boolean(curStart) && propStart !== curStart) ||
     (Boolean(propEnd) && Boolean(curEnd) && propEnd !== curEnd) ||
     (Boolean(propStart) && !curStart) ||
     (Boolean(propEnd) && !curEnd)
 
-  const title =
-    (isPlaceholderTitle(proposed.title) || proposed.title.includes('\u0000')) &&
-    !isPlaceholderTitle(current.title)
-      ? current.title
-      : proposed.title.trim()
-        ? proposed.title.includes('\u0000')
-          ? proposed.title.replaceAll('\u0000', '')
-          : proposed.title
+  const pickOwned = (
+    field: string,
+    proposedVal: string | undefined,
+    currentVal: string | undefined,
+  ): string | undefined => {
+    if (fieldExplicitlyChanged(field, changedFields)) {
+      return preferCleanText(proposedVal, currentVal)
+    }
+    // Preserve-by-default — including preserving blank/null.
+    return currentVal
+  }
+
+  const propTitleClean = cleanProposedText(proposed.title) ?? ''
+  let title = current.title
+  if (fieldExplicitlyChanged('title', changedFields)) {
+    title =
+      !isPlaceholderTitle(propTitleClean) && propTitleClean.trim()
+        ? propTitleClean
         : current.title
+  } else if (
+    proposed.title !== undefined &&
+    containsDisallowedControl(proposed.title) &&
+    !isBlank(current.title) &&
+    !containsDisallowedControl(current.title)
+  ) {
+    // Control-degraded proposed must not overwrite clean current.
+    title = current.title
+  } else if (
+    isPlaceholderTitle(propTitleClean) &&
+    !isPlaceholderTitle(current.title)
+  ) {
+    title = current.title
+  } else if (
+    (isBlank(current.title) || isPlaceholderTitle(current.title)) &&
+    !isPlaceholderTitle(propTitleClean) &&
+    propTitleClean.trim() &&
+    !(proposed.title && containsDisallowedControl(proposed.title))
+  ) {
+    // Fill only when current is blank/placeholder and proposed is clean.
+    title = propTitleClean
+  } else {
+    // Preserve-by-default: package reuse of externalId is not a title rewrite.
+    title = current.title
+  }
 
   const startAt = explicitTemporal
     ? proposed.startAt ?? current.startAt
@@ -446,25 +605,94 @@ export function mergePreservedPackageOption(
 
   const curSrcRank = WEAK_SOURCE[current.sourceType ?? ''] ?? 0
   const propSrcRank = WEAK_SOURCE[proposed.sourceType ?? ''] ?? 0
-  const sourceType =
-    propSrcRank >= curSrcRank && proposed.sourceType
-      ? proposed.sourceType
-      : ((current.sourceType as PackageTravelOption['sourceType']) ??
-        proposed.sourceType ??
-        'agent')
 
-  const sourceUrl = preferText(proposed.sourceUrl, current.sourceUrl)
-  const provider = preferText(proposed.provider, current.provider)
-  const checkedAt = preferText(proposed.checkedAt, current.checkedAt)
-  const verificationStatus =
-    proposed.verificationStatus ?? current.verificationStatus
+  let sourceType: PackageTravelOption['sourceType']
+  let sourceUrl: string | undefined
+  let provider: string | undefined
+  let checkedAt: string | undefined
+  let verificationStatus = current.verificationStatus
 
-  const origin = preferText(proposed.origin, current.origin)
-  const destination = preferText(proposed.destination, current.destination)
-  const address = preferText(proposed.address, current.address)
-  const phone = preferText(proposed.phone, current.phone)
-  const description = preferText(proposed.description, current.description)
-  const notes = preferText(proposed.notes, current.notes)
+  const provenanceExplicit =
+    fieldExplicitlyChanged('sourceType', changedFields) ||
+    fieldExplicitlyChanged('sourceUrl', changedFields) ||
+    fieldExplicitlyChanged('provider', changedFields) ||
+    fieldExplicitlyChanged('checkedAt', changedFields) ||
+    fieldExplicitlyChanged('verificationStatus', changedFields)
+
+  if (provenanceExplicit) {
+    sourceType =
+      (proposed.sourceType as PackageTravelOption['sourceType']) ??
+      (current.sourceType as PackageTravelOption['sourceType']) ??
+      'agent'
+    sourceUrl = preferCleanText(proposed.sourceUrl, current.sourceUrl)
+    provider = preferCleanText(proposed.provider, current.provider)
+    checkedAt = preferCleanText(proposed.checkedAt, current.checkedAt)
+    verificationStatus =
+      proposed.verificationStatus ?? current.verificationStatus
+  } else if (
+    allowsFlightScheduleProvenance(entityType) &&
+    propSrcRank > curSrcRank &&
+    proposed.sourceType
+  ) {
+    // Structured upgrade only: stronger provenance on flights.
+    sourceType = proposed.sourceType
+    sourceUrl = preferCleanText(proposed.sourceUrl, current.sourceUrl)
+    provider = preferCleanText(proposed.provider, current.provider)
+    checkedAt = preferCleanText(proposed.checkedAt, current.checkedAt)
+    verificationStatus =
+      proposed.verificationStatus ?? current.verificationStatus
+  } else {
+    sourceType =
+      (current.sourceType as PackageTravelOption['sourceType']) ??
+      (propSrcRank >= curSrcRank && proposed.sourceType
+        ? proposed.sourceType
+        : undefined) ??
+      'agent'
+    // Prefer current provenance fields; fill blanks from clean proposed only
+    // when current is blank (not an owned-text overwrite of meaningful data).
+    sourceUrl = !isBlank(current.sourceUrl)
+      ? current.sourceUrl
+      : preferCleanText(proposed.sourceUrl, current.sourceUrl)
+    provider = !isBlank(current.provider)
+      ? current.provider
+      : preferCleanText(proposed.provider, current.provider)
+    checkedAt = !isBlank(current.checkedAt)
+      ? current.checkedAt
+      : preferCleanText(proposed.checkedAt, current.checkedAt)
+    verificationStatus =
+      current.verificationStatus ?? proposed.verificationStatus
+  }
+
+  const provenance = applyProvenanceInvariants(
+    entityType,
+    sourceType,
+    sourceUrl,
+    checkedAt,
+    current,
+  )
+  sourceType = provenance.sourceType
+  sourceUrl = provenance.sourceUrl
+  checkedAt = provenance.checkedAt
+
+  const origin = fieldExplicitlyChanged('origin', changedFields)
+    ? preferCleanText(proposed.origin, current.origin)
+    : !isBlank(current.origin)
+      ? current.origin
+      : preferCleanText(proposed.origin, current.origin)
+  const destination = fieldExplicitlyChanged('destination', changedFields)
+    ? preferCleanText(proposed.destination, current.destination)
+    : !isBlank(current.destination)
+      ? current.destination
+      : preferCleanText(proposed.destination, current.destination)
+
+  const address = pickOwned('address', proposed.address, current.address)
+  const phone = pickOwned('phone', proposed.phone, current.phone)
+  const description = pickOwned(
+    'description',
+    proposed.description,
+    current.description,
+  )
+  const notes = pickOwned('notes', proposed.notes, current.notes)
 
   const status =
     proposed.status === 'shortlisted' || proposed.status === 'researched'
@@ -475,7 +703,7 @@ export function mergePreservedPackageOption(
 
   return {
     externalId: proposed.externalId,
-    type: proposed.type || (current.type as PackageTravelOption['type']),
+    type: entityType,
     status,
     title,
     provider,
@@ -486,9 +714,13 @@ export function mergePreservedPackageOption(
     destination,
     address,
     phone,
-    priceObserved: proposed.priceObserved ?? current.priceObserved,
-    currency: (proposed.currency ??
-      current.currency) as PackageTravelOption['currency'],
+    priceObserved: fieldExplicitlyChanged('priceObserved', changedFields)
+      ? (proposed.priceObserved ?? current.priceObserved)
+      : (current.priceObserved ?? proposed.priceObserved),
+    currency: (fieldExplicitlyChanged('currency', changedFields)
+      ? (proposed.currency ?? current.currency)
+      : (current.currency ??
+        proposed.currency)) as PackageTravelOption['currency'],
     sourceUrl,
     checkedAt,
     verificationStatus,
@@ -1231,12 +1463,13 @@ export function compileMutationPlan(args: {
       pushPkgOpt(
         mergePreservedPackageOption(cur, fromProp, {
           allowTemporalReplace: !preserveTemporalIds.has(id) && shift,
+          // Ask Travel package apply has no per-field mask today; preserve-by-default.
         }),
       )
       continue
     }
     if (fromProp) {
-      pushPkgOpt(fromProp)
+      pushPkgOpt(scrubNewPackageOption(fromProp))
       continue
     }
     if (cur) {
@@ -1247,7 +1480,7 @@ export function compileMutationPlan(args: {
   for (const o of proposedPackage.travelOptions) {
     if (seen.has(o.externalId)) continue
     const role = inferLogicalRole(toView(o, o.externalId), proposedTrip)
-    if (role === 'other') pushPkgOpt(o)
+    if (role === 'other') pushPkgOpt(scrubNewPackageOption(o))
   }
 
   const normalizedPkg: TripPackageV1 = {

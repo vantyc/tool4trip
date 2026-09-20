@@ -74,6 +74,22 @@ describe('sanitizeForPostgres', () => {
     assert.equal(json.includes('\\u0000'), false)
     assert.deepEqual(JSON.parse(json), { notes: 'aerolnea' })
   })
+
+  it('C0 U+0015/U+0018/DEL stripped; tab/LF/CR and valid Unicode preserved', () => {
+    const uni = 'San Miguel — México · 🇲🇽'
+    const { value, events } = sanitizeForPostgres(
+      {
+        dirty: 'a\u0015b\u0018c\u007Fd',
+        ws: 'a\tb\nc\rd',
+        uni,
+      },
+      '$',
+    )
+    assert.equal(value.dirty, 'abcd')
+    assert.equal(value.ws, 'a\tb\nc\rd')
+    assert.equal(value.uni, uni)
+    assert.ok(events.some((e) => e.removed === 'C0_CONTROL'))
+  })
 })
 
 describe('FINAL LIVE APPLY fixture with U+0000 notes', () => {
