@@ -9,6 +9,10 @@ WORKDIR /app
 COPY shared ./shared
 COPY trip-api/src ./trip-api/src
 
+# shared/*.ts must resolve as ESM (nearest package.json) and find zod.
+RUN printf '%s\n' '{"type":"module"}' > /app/package.json \
+  && ln -sfn /app/trip-api/node_modules /app/node_modules
+
 WORKDIR /app/trip-api
 ENV NODE_ENV=production
 ENV LISTEN_ADDR=:8080
