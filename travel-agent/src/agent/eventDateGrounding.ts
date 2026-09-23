@@ -273,6 +273,7 @@ function scrubNarrativeDatedEventClaims(
   toolTrace: ToolTraceEntry[],
   context: TripContextSnapshot | undefined,
   yearHint: string,
+  protectedDates: Set<string> = new Set(),
 ): { narrative: string; warnings: string[] } {
   if (!narrative.trim()) return { narrative, warnings: [] }
   const warnings: string[] = []
@@ -291,6 +292,7 @@ function scrubNarrativeDatedEventClaims(
     }
     const bad = dates.filter(
       (d) =>
+        !protectedDates.has(d) &&
         !webEvidenceSupportsEventDate(toolTrace, part, d) &&
         !contextSupportsEventDate(context, part, d),
     )
@@ -299,20 +301,60 @@ function scrubNarrativeDatedEventClaims(
       continue
     }
     let softened = part
-    softened = softened.replace(
-      /\b(?:el\s+)?(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)?\s*\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+20\d{2})?\b/gi,
-      'durante la estancia (fecha tentativa)',
-    )
+    // Only scrub dates that are ungrounded AND not trip-window / flight dates.
+    // Consume leading "al "/"el " so we never produce "aldurante…".
+    for (const d of bad) {
+      // Skip dates in explicit flight / salida / regreso clauses — those are trip logistics.
+      const flightDateContext = new RegExp(
+        `(?:salida|regreso|vuelo|ida|vuelve|volver|partir|llega(?:r|da)?)[^.\\n]{0,40}${escapeRegExp(
+          dateFormsForMatch(d)[0] ?? d,
+        )}`,
+        'i',
+      )
+      // Broader: if the phrase is "salida al <date>" or "regreso al <date>", keep it.
+      const logisticPhrase = new RegExp(
+        `(?:salida|regreso|ida|vuelta)\\s+al?\\s+(?:el\\s+)?(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)?\\s*\\d{1,2}\\s+de\\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\\s+de\\s+20\\d{2})?`,
+        'gi',
+      )
+      // Protect logistic phrases by temporarily masking them
+      const masks: string[] = []
+      softened = softened.replace(logisticPhrase, (m) => {
+        const token = `__KEEP_DATE_${masks.length}__`
+        masks.push(m)
+        return token
+      })
+      void flightDateContext
+      for (const form of dateFormsForMatch(d)) {
+        const re = new RegExp(
+          `(?:\\b(?:al|el)\\s+)?(?:(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\\s+)?${escapeRegExp(form)}`,
+          'gi',
+        )
+        softened = softened.replace(
+          re,
+          'en fecha tentativa del evento (pendiente de verificar)',
+        )
+      }
+      masks.forEach((m, i) => {
+        softened = softened.replace(`__KEEP_DATE_${i}__`, m)
+      })
+    }
     if (!/pendiente de verificar|fecha tentativa/i.test(softened)) {
       softened = softened.replace(/\.\s*$/, '')
       softened = `${softened} — pendiente de verificar con fuente actual.`
     }
+    // Collapse accidental glue like "aldurante" if anything slipped through
+    softened = softened.replace(/\baldurante\b/gi, 'durante')
+    softened = softened.replace(/\s{2,}/g, ' ').trim()
     out.push(softened)
     warnings.push(
       `server: narrativa suavizada — no afirmar evento externo en fecha(s) ${bad.join(', ')} sin evidencia.`,
     )
   }
   return { narrative: out.join(' '), warnings }
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /**
@@ -335,12 +377,35 @@ export function demoteUnverifiedExternalEventDates(
     str(trip.endDate).slice(0, 4) ||
     '2026'
 
+  const protectedDates = new Set<string>()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str(trip.startDate))) {
+    protectedDates.add(str(trip.startDate).slice(0, 10))
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str(trip.endDate))) {
+    protectedDates.add(str(trip.endDate).slice(0, 10))
+  }
+  // Also protect flight schedule dates in the package
+  if (Array.isArray(pkg?.travelOptions)) {
+    for (const raw of pkg.travelOptions) {
+      if (!raw || typeof raw !== 'object') continue
+      const o = raw as Rec
+      if (str(o.type) !== 'flight' && str(o.sourceType) !== 'flight_schedule') {
+        continue
+      }
+      const s = str(o.startAt)
+      const e = str(o.endAt)
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) protectedDates.add(s.slice(0, 10))
+      if (/^\d{4}-\d{2}-\d{2}/.test(e)) protectedDates.add(e.slice(0, 10))
+    }
+  }
+
   if (typeof draft.narrative === 'string') {
     const n = scrubNarrativeDatedEventClaims(
       draft.narrative,
       toolTrace,
       context,
       yearHint,
+      protectedDates,
     )
     draft.narrative = n.narrative
     warnings.push(...n.warnings)

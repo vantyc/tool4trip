@@ -1192,3 +1192,166 @@ button:disabled {
   font-family: var(--font-display);
   font-size: 1.15rem;
 }
+
+/* —— Ask Travel proposal view —— */
+.ask-travel-page .ask-proposal-header {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.ask-status-pill {
+  display: inline-block;
+  margin: 0.35rem 0 0.75rem;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--line));
+}
+
+.ask-proposal-meta {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.ask-proposal-meta > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.ask-proposal-meta dt {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.ask-proposal-meta dd {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.ask-counts {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.ask-warnings {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--line));
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+
+.ask-warnings h3 {
+  margin-top: 0;
+}
+
+.ask-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.ask-diff-table th,
+.ask-diff-table td {
+  border: 1px solid var(--line);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.ask-diff-table th {
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.ask-diff-cards {
+  display: none;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  gap: 0.65rem;
+}
+
+.ask-diff-card,
+.ask-evidence-card {
+  border: 1px solid var(--line);
+  padding: 0.7rem 0.8rem;
+  margin: 0;
+}
+
+.ask-diff-card p,
+.ask-evidence-card p {
+  margin: 0.25rem 0;
+}
+
+.ask-collapsible {
+  margin: 0.85rem 0;
+}
+
+.ask-pre {
+  margin: 0.5rem 0 0;
+  padding: 0.65rem 0.75rem;
+  overflow: auto;
+  max-height: 18rem;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+
+.ask-confidence {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+
+.ask-evidence-cards {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.ask-confirm {
+  margin-top: 1rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+
+.ask-raw-block {
+  margin-top: 0.75rem;
+}
+
+@media (max-width: 639px) {
+  .ask-diff-desktop {
+    display: none;
+  }
+
+  .ask-diff-cards {
+    display: grid;
+  }
+}
+
+@media (min-width: 640px) {
+  .ask-diff-cards {
+    display: none;
+  }
+
+  .ask-proposal-meta {
+    grid-template-columns: 1fr 1fr;
+  }
+}

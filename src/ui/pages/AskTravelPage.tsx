@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { services } from '../../application'
 import {
@@ -9,24 +9,35 @@ import {
   type AgentProposal,
   type CanonicalPreview,
 } from '../../application/agentClient'
-import type { ImportUpdatePlan } from '../../application/packageImport'
+import {
+  buildCanonicalNarrative,
+  collectStructuredEvidence,
+  countCanonicalDiff,
+  detectDependencyWarnings,
+  flightScheduleConfidenceLabels,
+  formatDateLongEs,
+  type TravelOptionLike,
+} from '../../application/askTravelProposalView'
 import type { Trip } from '../../domain/types'
 import { useOnline } from '../useOnline'
 import { safeDisplayText } from '../../../shared/displaySanitize'
 
-function optionPrimarySource(o: {
-  sourceUrl?: string
-  provider?: string
-  checkedAt?: string
-  sourceType?: string
-  title?: string
-}): string {
+function optionPrimarySource(o: TravelOptionLike): string {
   const parts: string[] = []
   if (o.sourceType) parts.push(o.sourceType)
   if (o.provider) parts.push(o.provider)
   if (o.sourceUrl) parts.push(o.sourceUrl)
   if (o.checkedAt) parts.push(`checked ${o.checkedAt}`)
+  const confidence = flightScheduleConfidenceLabels(o)
+  if (confidence.length) parts.push(confidence.join(' · '))
   return parts.join(' · ') || 'sin fuente estructurada'
+}
+
+function opLabel(kind: string): string {
+  if (kind === 'add') return 'Alta'
+  if (kind === 'remove') return 'Eliminación'
+  if (kind === 'update') return 'Actualización'
+  return kind
 }
 
 export function AskTravelPage() {
@@ -38,13 +49,16 @@ export function AskTravelPage() {
   const [trips, setTrips] = useState<Trip[]>([])
   const [tripId, setTripId] = useState(initialTripId)
   const [prompt, setPrompt] = useState('')
+  const [submittedPrompt, setSubmittedPrompt] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [jobStatus, setJobStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [staleMessage, setStaleMessage] = useState<string | null>(null)
   const [proposal, setProposal] = useState<AgentProposal | null>(null)
   const [canonical, setCanonical] = useState<CanonicalPreview | null>(null)
-  const [plan, setPlan] = useState<ImportUpdatePlan | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const selectedTrip = trips.find((t) => t.id === tripId)
 
   useEffect(() => {
     void services.trips.list().then((list) => {
@@ -59,7 +73,6 @@ export function AskTravelPage() {
   async function refreshCanonicalPreview(p: AgentProposal, tid: string) {
     const preview = await previewAgentProposal(services, p, { tripId: tid })
     setCanonical(preview.canonical ?? null)
-    setPlan(preview.plan)
     setStaleMessage(null)
   }
 
@@ -70,7 +83,8 @@ export function AskTravelPage() {
     setStaleMessage(null)
     setProposal(null)
     setCanonical(null)
-    setPlan(null)
+    setConfirmOpen(false)
+    setSubmittedPrompt(prompt.trim())
     setJobStatus('queued')
     try {
       const p = await askTravelAgent(
@@ -109,11 +123,12 @@ export function AskTravelPage() {
     }
   }
 
-  async function handleApply() {
+  async function handleApplyConfirmed() {
     if (!proposal || !canonical || canonical.status !== 'ok') return
     setBusy(true)
     setError(null)
     setStaleMessage(null)
+    setConfirmOpen(false)
     try {
       const { tripId: tid } = await applyAgentProposal(services, proposal, {
         expectedFingerprint: canonical.fingerprint,
@@ -135,10 +150,63 @@ export function AskTravelPage() {
   function handleDiscard() {
     setProposal(null)
     setCanonical(null)
-    setPlan(null)
+    setSubmittedPrompt(null)
+    setConfirmOpen(false)
     setError(null)
     setStaleMessage(null)
   }
+
+  const normalizedOptions: TravelOptionLike[] =
+    (
+      canonical?.normalizedPackage as
+        | { travelOptions?: TravelOptionLike[] }
+        | undefined
+    )?.travelOptions ?? []
+
+  const proposedTrip = (
+    canonical?.normalizedPackage as
+      | { trip?: { startDate?: string; endDate?: string; title?: string } }
+      | undefined
+  )?.trip
+
+  const counts = useMemo(
+    () =>
+      canonical
+        ? countCanonicalDiff(canonical.diff, normalizedOptions.length)
+        : null,
+    [canonical, normalizedOptions.length],
+  )
+
+  const dependencyWarnings = useMemo(
+    () => detectDependencyWarnings(normalizedOptions),
+    [normalizedOptions],
+  )
+
+  const canonicalNarrative = useMemo(() => {
+    if (!canonical || !selectedTrip || !proposedTrip?.startDate) return null
+    return buildCanonicalNarrative({
+      tripTitle: selectedTrip.title,
+      currentWindow: {
+        startDate: selectedTrip.startDate,
+        endDate: selectedTrip.endDate,
+      },
+      proposedWindow: {
+        startDate: proposedTrip.startDate,
+        endDate: proposedTrip.endDate ?? proposedTrip.startDate,
+      },
+      diff: canonical.diff,
+      normalizedOptions,
+    })
+  }, [canonical, selectedTrip, proposedTrip, normalizedOptions])
+
+  const evidenceRows = useMemo(() => {
+    if (!proposal) return []
+    return collectStructuredEvidence({
+      warnings: proposal.warnings ?? [],
+      diffSummary: proposal.diffSummary ?? [],
+      toolTrace: proposal.toolTrace ?? [],
+    })
+  }, [proposal])
 
   const applyEnabled =
     Boolean(proposal) &&
@@ -149,15 +217,13 @@ export function AskTravelPage() {
     !staleMessage &&
     !busy
 
-  const normalizedOptions =
-    (
-      canonical?.normalizedPackage as
-        | { travelOptions?: Array<Record<string, unknown>> }
-        | undefined
-    )?.travelOptions ?? []
+  function requestApply() {
+    if (!applyEnabled) return
+    setConfirmOpen(true)
+  }
 
   return (
-    <section className="page">
+    <section className="page ask-travel-page">
       <p>
         <Link to="/">← Tool4Trip</Link>
       </p>
@@ -239,8 +305,50 @@ export function AskTravelPage() {
 
       {proposal && (
         <div className="agent-proposal">
-          <h2>Propuesta</h2>
-          <p>{safeDisplayText(proposal.narrative)}</p>
+          <header className="ask-proposal-header">
+            <h2>Propuesta</h2>
+            <p className="ask-status-pill" role="status">
+              Pendiente de aplicar — nada se ha persistido todavía
+            </p>
+            <dl className="ask-proposal-meta">
+              <div>
+                <dt>Viaje</dt>
+                <dd>{safeDisplayText(selectedTrip?.title ?? '—')}</dd>
+              </div>
+              <div>
+                <dt>Ventana</dt>
+                <dd>
+                  {selectedTrip
+                    ? `${formatDateLongEs(selectedTrip.startDate)} → ${formatDateLongEs(selectedTrip.endDate)}`
+                    : '—'}
+                  {proposedTrip?.startDate
+                    ? `  ⇒  ${formatDateLongEs(proposedTrip.startDate)} → ${formatDateLongEs(proposedTrip.endDate ?? proposedTrip.startDate)}`
+                    : ''}
+                </dd>
+              </div>
+              <div>
+                <dt>Operaciones</dt>
+                <dd>{counts?.totalOps ?? 0}</dd>
+              </div>
+              <div>
+                <dt>Conflictos</dt>
+                <dd>
+                  {(canonical?.conflicts.length ?? 0) +
+                    dependencyWarnings.length}
+                </dd>
+              </div>
+            </dl>
+          </header>
+
+          <details className="ask-collapsible">
+            <summary>Solicitud original</summary>
+            <pre className="ask-pre">
+              {safeDisplayText(submittedPrompt ?? prompt)}
+            </pre>
+          </details>
+
+          <h3>Resumen canónico</h3>
+          <p>{safeDisplayText(canonicalNarrative ?? 'Sin resumen canónico.')}</p>
 
           {canonical?.status === 'review_required' && (
             <div className="status-bad">
@@ -258,6 +366,21 @@ export function AskTravelPage() {
             </div>
           )}
 
+          {dependencyWarnings.length > 0 && (
+            <div className="ask-warnings" role="alert">
+              <h3>Advertencias de dependencia</h3>
+              <ul>
+                {dependencyWarnings.map((w) => (
+                  <li key={w.code}>{safeDisplayText(w.message)}</li>
+                ))}
+              </ul>
+              <p className="muted">
+                No se ajustan nodos dependientes automáticamente — revisa antes
+                de aplicar.
+              </p>
+            </div>
+          )}
+
           {(canonical?.warnings?.length ?? 0) > 0 && (
             <ul className="muted">
               {canonical!.warnings.map((w) => (
@@ -266,45 +389,88 @@ export function AskTravelPage() {
             </ul>
           )}
 
+          {canonical && counts && (
+            <p className="ask-counts">
+              Altas {counts.adds} · Actualizaciones {counts.updates} ·
+              Eliminaciones {counts.removes} · Sin cambios {counts.unchanged} ·
+              Total operaciones {counts.totalOps}
+            </p>
+          )}
+
           {canonical && canonical.diff.length > 0 && (
             <>
               <h3>Cambios canónicos</h3>
-              <table className="diff-table">
-                <thead>
-                  <tr>
-                    <th>Op</th>
-                    <th>Entidad</th>
-                    <th>Detalle</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {canonical.diff.map((d, i) => (
-                    <tr key={`${d.kind}-${d.externalId}-${i}`}>
-                      <td>{safeDisplayText(d.kind)}</td>
-                      <td>{safeDisplayText(d.externalId)}</td>
-                      <td>
-                        {d.fields?.length
-                          ? d.fields
-                              .map(
-                                (f) =>
-                                  `${safeDisplayText(f.field, '')}: ${safeDisplayText(f.before)} → ${safeDisplayText(f.after)}`,
-                              )
-                              .join('; ')
-                          : safeDisplayText(d.note)}
-                      </td>
+              <div className="ask-diff-desktop">
+                <table className="ask-diff-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Operación</th>
+                      <th scope="col">Entidad</th>
+                      <th scope="col">Detalle</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {canonical.diff.map((d, i) => (
+                      <tr key={`${d.kind}-${d.externalId}-${i}`}>
+                        <td data-label="Operación">
+                          {safeDisplayText(opLabel(d.kind))}
+                        </td>
+                        <td data-label="Entidad">
+                          {safeDisplayText(d.externalId)}
+                        </td>
+                        <td data-label="Detalle">
+                          {d.fields?.length
+                            ? d.fields
+                                .map(
+                                  (f) =>
+                                    `${safeDisplayText(f.field, '')}: ${safeDisplayText(f.before)} → ${safeDisplayText(f.after)}`,
+                                )
+                                .join('; ')
+                            : safeDisplayText(d.note)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ul className="ask-diff-cards">
+                {canonical.diff.map((d, i) => (
+                  <li
+                    key={`card-${d.kind}-${d.externalId}-${i}`}
+                    className="ask-diff-card"
+                  >
+                    <p>
+                      <strong>Operación:</strong>{' '}
+                      {safeDisplayText(opLabel(d.kind))}
+                    </p>
+                    <p>
+                      <strong>Entidad:</strong>{' '}
+                      {safeDisplayText(d.externalId)}
+                    </p>
+                    <p>
+                      <strong>Detalle:</strong>{' '}
+                      {d.fields?.length
+                        ? d.fields
+                            .map(
+                              (f) =>
+                                `${safeDisplayText(f.field, '')}: ${safeDisplayText(f.before)} → ${safeDisplayText(f.after)}`,
+                            )
+                            .join('; ')
+                        : safeDisplayText(d.note)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
             </>
           )}
 
           {canonical && normalizedOptions.length > 0 && (
             <>
               <h3>Estado deseado (canónico)</h3>
-              <ul>
+              <ul className="ask-desired-list">
                 {normalizedOptions.map((o) => {
                   const ext = String(o.externalId ?? '')
+                  const labels = flightScheduleConfidenceLabels(o)
                   return (
                     <li key={ext}>
                       <strong>{safeDisplayText(o.title ?? ext)}</strong>
@@ -314,27 +480,17 @@ export function AskTravelPage() {
                       <br />
                       <span className="muted">
                         {safeDisplayText(
-                          optionPrimarySource({
-                            sourceUrl:
-                              typeof o.sourceUrl === 'string'
-                                ? o.sourceUrl
-                                : undefined,
-                            provider:
-                              typeof o.provider === 'string'
-                                ? o.provider
-                                : undefined,
-                            checkedAt:
-                              typeof o.checkedAt === 'string'
-                                ? o.checkedAt
-                                : undefined,
-                            sourceType:
-                              typeof o.sourceType === 'string'
-                                ? o.sourceType
-                                : undefined,
-                          }),
+                          optionPrimarySource(o),
                           'sin fuente estructurada',
                         )}
                       </span>
+                      {labels.length > 0 && (
+                        <ul className="ask-confidence">
+                          {labels.map((l) => (
+                            <li key={l}>{l}</li>
+                          ))}
+                        </ul>
+                      )}
                     </li>
                   )
                 })}
@@ -342,72 +498,51 @@ export function AskTravelPage() {
             </>
           )}
 
-          {plan && (
-            <p className="muted">
-              Resumen canónico: altas {plan.created}, cambios {plan.updated},
-              sin cambios de campo {plan.unchanged}
-              {plan.isUpdate ? ` · revisión propuesta ${plan.revision}` : ''}
-            </p>
-          )}
-
-          <details>
-            <summary>Evidencia del agente (RAW / debug)</summary>
-            {proposal.warnings.length > 0 && (
-              <ul className="muted">
-                {proposal.warnings.map((w) => (
-                  <li key={w}>{safeDisplayText(w)}</li>
-                ))}
-              </ul>
-            )}
-            {proposal.diffSummary.length > 0 && (
-              <table className="diff-table">
-                <thead>
-                  <tr>
-                    <th>Qué (RAW)</th>
-                    <th>Antes</th>
-                    <th>Después</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {proposal.diffSummary.map((d, i) => (
-                    <tr key={`raw-${d.entityKind}-${i}`}>
-                      <td>
-                        {safeDisplayText(d.entityRef ?? d.entityKind)}
-                        {d.note ? ` — ${safeDisplayText(d.note, '')}` : ''}
-                      </td>
-                      <td>{safeDisplayText(d.before)}</td>
-                      <td>{safeDisplayText(d.after)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {proposal.toolTrace.length > 0 && (
-              <ul>
-                {proposal.toolTrace.map((t, i) => (
-                  <li key={`${t.tool}-${i}`}>
-                    {safeDisplayText(t.tool)}:{' '}
-                    {t.ok ? 'ok' : safeDisplayText(t.error ?? 'fail')}
-                    {t.sources && t.sources.length > 0 && (
-                      <ul>
-                        {t.sources.map((s, j) => (
-                          <li key={`${i}-${j}`}>
-                            {safeDisplayText(s.title ?? 'source')}
-                            {s.url ? ` — ${safeDisplayText(s.url, '')}` : ''}
-                          </li>
-                        ))}
-                      </ul>
+          <details className="ask-collapsible">
+            <summary>Evidencia del agente</summary>
+            {evidenceRows.length === 0 ? (
+              <p className="muted">Sin evidencia adicional</p>
+            ) : (
+              <ul className="ask-evidence-cards">
+                {evidenceRows.map((row, i) => (
+                  <li key={`${row.kind}-${i}`} className="ask-evidence-card">
+                    <p>
+                      <strong>{safeDisplayText(row.kind)}</strong> —{' '}
+                      {safeDisplayText(row.title)}
+                    </p>
+                    {row.detail && (
+                      <p className="muted">{safeDisplayText(row.detail)}</p>
+                    )}
+                    {row.url && (
+                      <p className="muted">{safeDisplayText(row.url)}</p>
                     )}
                   </li>
                 ))}
               </ul>
             )}
+            <details className="ask-collapsible ask-raw-block">
+              <summary>RAW / debug (escapado)</summary>
+              <pre className="ask-pre">
+                {safeDisplayText(
+                  JSON.stringify(
+                    {
+                      narrative: proposal.narrative,
+                      warnings: proposal.warnings,
+                      diffSummary: proposal.diffSummary,
+                      toolTrace: proposal.toolTrace,
+                    },
+                    null,
+                    2,
+                  ),
+                )}
+              </pre>
+            </details>
           </details>
 
           <div className="actions">
             <button
               type="button"
-              onClick={() => void handleApply()}
+              onClick={requestApply}
               disabled={!applyEnabled}
             >
               Aplicar cambios
@@ -416,6 +551,57 @@ export function AskTravelPage() {
               Descartar
             </button>
           </div>
+
+          {confirmOpen && counts && (
+            <div className="ask-confirm" role="dialog" aria-modal="true">
+              <h3>Confirmar Apply</h3>
+              <p className="muted">
+                Nada se ha persistido todavía. Revisa el resumen antes de
+                continuar.
+              </p>
+              <ul>
+                <li>Entidades agregadas: {counts.adds}</li>
+                <li>Entidades actualizadas: {counts.updates}</li>
+                <li>Entidades eliminadas: {counts.removes}</li>
+                <li>
+                  Conflictos pendientes:{' '}
+                  {(canonical?.conflicts.length ?? 0) +
+                    dependencyWarnings.length}
+                </li>
+              </ul>
+              {dependencyWarnings.length > 0 && (
+                <div className="ask-warnings">
+                  <p>
+                    Hay conflictos temporales o de traslado. Confirma
+                    explícitamente que quieres aplicar de todos modos.
+                  </p>
+                  <ul>
+                    {dependencyWarnings.map((w) => (
+                      <li key={`c-${w.code}`}>{safeDisplayText(w.message)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="actions">
+                <button
+                  type="button"
+                  onClick={() => void handleApplyConfirmed()}
+                  disabled={busy}
+                >
+                  {dependencyWarnings.length > 0
+                    ? 'Confirmar Apply con conflictos'
+                    : 'Confirmar Apply'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmOpen(false)}
+                  disabled={busy}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>

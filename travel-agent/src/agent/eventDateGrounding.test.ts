@@ -388,3 +388,55 @@ describe('eventDateGrounding pending marker', () => {
     assert.match(PENDING_EVENT_NOTE, /no trasladar fechas/i)
   })
 })
+
+describe('narrative scrub protects trip/flight dates', () => {
+  it('does not turn salida/regreso dates into aldurante…', () => {
+    const draft: Record<string, unknown> = {
+      narrative:
+        'Se actualizan las fechas del viaje a San Miguel el Alto para la serenata 2026, ajustando la salida al 24 de septiembre de 2026 y el regreso al 29 de septiembre de 2026.',
+      package: {
+        schemaVersion: 1,
+        packageId: 'pkg',
+        revision: 1,
+        trip: {
+          title: 'SMA',
+          startDate: '2026-09-24',
+          endDate: '2026-09-29',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        travelOptions: [
+          {
+            externalId: 'outbound-flight-24sep',
+            type: 'flight',
+            status: 'shortlisted',
+            title: 'VB1392',
+            startAt: '2026-09-24T06:00:00-06:00',
+            sourceType: 'flight_schedule',
+            sourceUrl:
+              'https://aerodatabox.com/?origin=MEX&destination=GDL&date=2026-09-24&flight=VB1392',
+          },
+          {
+            externalId: 'return-flight-29sep',
+            type: 'flight',
+            status: 'shortlisted',
+            title: 'AM201',
+            startAt: '2026-09-29T05:47:00-06:00',
+            sourceType: 'flight_schedule',
+            sourceUrl:
+              'https://aerodatabox.com/?origin=GDL&destination=MEX&date=2026-09-29&flight=AM201',
+          },
+        ],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+      },
+    }
+    demoteUnverifiedExternalEventDates(draft, [])
+    const n = String(draft.narrative)
+    assert.equal(/aldurante/i.test(n), false)
+    assert.match(n, /salida al 24 de septiembre de 2026/i)
+    assert.match(n, /regreso al 29 de septiembre de 2026/i)
+  })
+})
