@@ -6,7 +6,8 @@ import type {
   TravelOption,
   TravelOptionType,
 } from '../domain/types'
-import { newId, touchTimestamps } from './ids'
+import { applyQuoteRevision } from '../../shared/quoteLedger'
+import { newId, nowIso, touchTimestamps } from './ids'
 import { enrichTripPackageAirportArrivals } from './airportArrivalEnrich'
 import {
   USER_DECISION_STATUSES,
@@ -172,6 +173,73 @@ export function createTravelOptionService(repos: Repositories) {
       const option: TravelOption = {
         ...existing,
         notes: notes.trim() || undefined,
+        ...touchTimestamps(existing),
+      }
+      await repos.travelOptions.put(option)
+      return option
+    },
+
+    /**
+     * Edit the live quote. A changed price keeps the previous amount,
+     * its consultation date and its source. Does not book or pay.
+     */
+    updateQuote: async (
+      id: string,
+      patch: {
+        priceObserved?: number | null
+        currency?: string
+        sourceUrl?: string | null
+        checkedAt?: string
+        nextAction?: string | null
+      },
+    ): Promise<TravelOption> => {
+      const existing = await repos.travelOptions.getById(id)
+      if (!existing) throw new Error('Opción no encontrada')
+      const priceObserved =
+        patch.priceObserved === null
+          ? undefined
+          : patch.priceObserved === undefined
+            ? existing.priceObserved
+            : patch.priceObserved
+      if (
+        priceObserved !== undefined &&
+        (!Number.isFinite(priceObserved) || priceObserved < 0)
+      ) {
+        throw new Error('Precio inválido')
+      }
+      const currency =
+        patch.currency ??
+        existing.currency ??
+        (priceObserved !== undefined ? 'MXN' : undefined)
+      const sourceUrl =
+        patch.sourceUrl === null
+          ? undefined
+          : patch.sourceUrl === undefined
+            ? existing.sourceUrl
+            : patch.sourceUrl.trim() || undefined
+      const nextAction =
+        patch.nextAction === null
+          ? undefined
+          : patch.nextAction === undefined
+            ? existing.nextAction
+            : patch.nextAction.trim() || undefined
+      const priceChanged =
+        priceObserved !== existing.priceObserved ||
+        (currency ?? '') !== (existing.currency ?? '')
+      const checkedAt = priceChanged
+        ? (patch.checkedAt ?? nowIso())
+        : (patch.checkedAt ?? existing.checkedAt)
+      const revised = applyQuoteRevision(existing, {
+        ...existing,
+        priceObserved,
+        currency,
+        sourceUrl,
+        nextAction,
+        checkedAt,
+      })
+      const option: TravelOption = {
+        ...existing,
+        ...revised,
         ...touchTimestamps(existing),
       }
       await repos.travelOptions.put(option)

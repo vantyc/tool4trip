@@ -15,6 +15,7 @@ import { OptionsPage } from '../ui/pages/OptionsPage'
 import { TripLayout } from '../ui/pages/TripLayout'
 import { TripListPage } from '../ui/pages/TripListPage'
 import { TripOverviewPage } from '../ui/pages/TripOverviewPage'
+import { TripBoardPage } from '../ui/tripBoard/TripBoardPage'
 import './App.css'
 
 export function App() {
@@ -79,6 +80,7 @@ export function App() {
           <Route path="/import" element={<ImportResearchPage />} />
           <Route path="/trips/:tripId" element={<TripLayout />}>
             <Route index element={<TripOverviewPage />} />
+            <Route path="tablero" element={<TripBoardPage />} />
             <Route path="options" element={<OptionsPage />} />
             <Route path="bookings" element={<BookingsPage />} />
             <Route path="itinerary" element={<ItineraryPage />} />
