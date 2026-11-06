@@ -11,13 +11,13 @@ import {
   localClock,
   localDate,
 } from '../../application/tripBoard/time'
-import { kindLabel, legGlyph, STATUS_LABEL } from './boardFormat'
+import { ITEM_STATUS_LABEL, kindLabel, legGlyph, STATUS_LABEL } from './boardFormat'
 import { Glyph } from './Glyph'
 import { PlaceImage } from './PlaceImage'
 import type { PlaceMedia } from './placeMedia'
 
-const CARD_MIN = 168
-const CONNECTOR = 76
+const CARD_MIN = 190
+const CONNECTOR = 84
 
 function stopLines(stop: BoardStop, board: TripBoard): [string, string] {
   const arrival = board.legs.find((l) => l.id === stop.arrivalLegId)
@@ -34,15 +34,24 @@ function stopLines(stop: BoardStop, board: TripBoard): [string, string] {
       `${formatDuration(stop.layoverMinutes)} de conexión`,
     ]
   }
-  const from = localDate(stop.checkIn) ?? localDate(stop.arriveAt) ?? arrival?.dateHint
-  const to = localDate(stop.checkOut) ?? localDate(stop.departAt) ?? departure?.dateHint
-  const nights = stop.nights !== undefined ? ` · ${stop.nights} ${stop.nights === 1 ? 'noche' : 'noches'}` : ''
   const chosen = stop.lodging.find((l) => l.role === 'chosen')
   const hotel = chosen
-    ? `${chosen.provider ?? 'Hotel'} · ${STATUS_LABEL[chosen.status].toLowerCase()}`
+    ? `${chosen.provider ?? 'Hotel'} · ${ITEM_STATUS_LABEL[chosen.status].toLowerCase()}`
     : stop.lodging.length > 0
       ? 'Hotel por decidir'
       : 'Sin hotel'
+  const split = board.splits.find(
+    (s) => s.firstNights === undefined && (s.firstStopId === stop.id || s.secondStopId === stop.id),
+  )
+  if (split && split.firstStopId === stop.id) {
+    return [`${formatDayEs(stop.checkIn, false) ?? '¿?'} → fechas por definir`, hotel]
+  }
+  if (stop.window && !stop.checkIn) {
+    return [`Fechas por definir · hasta ${formatDayEs(stop.window.to, false)}`, hotel]
+  }
+  const from = localDate(stop.checkIn) ?? localDate(stop.arriveAt) ?? arrival?.dateHint
+  const to = localDate(stop.checkOut) ?? localDate(stop.departAt) ?? departure?.dateHint
+  const nights = stop.nights !== undefined ? ` · ${stop.nights} ${stop.nights === 1 ? 'noche' : 'noches'}` : ''
   return [`${formatDayEs(from, false) ?? '¿?'} → ${formatDayEs(to, false) ?? '¿?'}${nights}`, hotel]
 }
 
@@ -77,7 +86,8 @@ function StopCard({
         {line2 && <span className="tb-card-line tb-card-line2">{line2}</span>}
         {stop.pending.length > 0 && (
           <span className="tb-card-pending">
-            {stop.pending.length} {stop.pending.length === 1 ? 'pendiente' : 'pendientes'}
+            {stop.pending[0]}
+            {stop.pending.length > 1 && ` · +${stop.pending.length - 1}`}
           </span>
         )}
       </span>
@@ -92,7 +102,7 @@ function legCaption(leg: BoardLeg): string {
     return d ? `${names} · ${d}` : names
   }
   const day = formatDayEs(leg.dateHint, false)
-  return `Por elegir${day ? ` · ${day}` : ''}`
+  return `Por elegir · ${day ?? 'fecha por definir'}`
 }
 
 function LegButton({

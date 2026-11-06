@@ -13,6 +13,7 @@ import { useDocumentViewer } from '../documents/useDocumentViewer'
 import { TripPanel } from '../tripPanel'
 import { useCardActions } from '../tripPanel/useCardActions'
 import { useCloudQuery } from '../useCloudQuery'
+import { useReadOnly } from '../useReadOnly'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 const DEMO_DEFAULT_NOW = '2026-09-20T10:00:00-06:00'
@@ -36,6 +37,7 @@ export function TripOverviewPage() {
   const { trip } = useOutletContext<{ trip: Trip }>()
   const { open, Viewer } = useDocumentViewer()
   const isDemo = trip.id === DEMO_TRIP_ID
+  const readOnly = useReadOnly()
   const [clockPreset, setClockPreset] = useState<string>(
     isDemo ? DEMO_DEFAULT_NOW : 'real',
   )
@@ -144,6 +146,19 @@ export function TripOverviewPage() {
             ))}
           </select>
         </div>
+      )}
+
+      {trip.goals.length > 0 && (
+        <section className="sum-block" aria-labelledby="sum-goals">
+          <h2 id="sum-goals" className="sum-label">
+            Objetivos del viaje
+          </h2>
+          <ul className="goal-list">
+            {trip.goals.map((g) => (
+              <li key={g.id}>{g.label}</li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {current && (
@@ -296,6 +311,7 @@ export function TripOverviewPage() {
                   <input
                     type="checkbox"
                     checked={false}
+                    disabled={readOnly}
                     onChange={() => void toggleCheck(item)}
                   />
                   <span>{item.label}</span>

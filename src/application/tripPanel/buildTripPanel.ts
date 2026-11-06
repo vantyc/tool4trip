@@ -7,6 +7,7 @@ import {
   extractIataCode,
   subtractMinutesIso,
 } from '../../../shared/airportArrivalPolicy'
+import { quoteLedger } from '../../../shared/quoteLedger'
 import type {
   Booking,
   ChecklistItem,
@@ -266,6 +267,8 @@ export function computeTripPanelDiagnostics(input: {
   sourceUrls: string[]
   /** Distinct URLs from toolTrace (consulted evidence). */
   consultedSourceUrls?: string[]
+  /** URLs backing grounded findings (researchDiagnostics `grounded_claim`). */
+  groundedSourceUrls?: string[]
   agentWarnings?: string[]
   nights?: number
   hasOutboundFlight: boolean
@@ -282,7 +285,15 @@ export function computeTripPanelDiagnostics(input: {
     ? [...new Set(input.consultedSourceUrls)].length
     : undefined
 
-  if (sourceCount === 0) {
+  const groundedFindingSourceCount = input.groundedSourceUrls?.length
+    ? new Set(input.groundedSourceUrls).size
+    : undefined
+
+  if (sourceCount === 0 && groundedFindingSourceCount) {
+    warnings.push(
+      `Sin fuentes ancladas a entidades del paquete; ${groundedFindingSourceCount} fuente(s) verificada(s) respaldan hallazgos de la investigación.`,
+    )
+  } else if (sourceCount === 0) {
     warnings.push('Ausencia de fuentes: ninguna URL verificable en las opciones.')
     if (consultedSourceCount && consultedSourceCount > 0) {
       warnings.push(
@@ -429,6 +440,7 @@ export function computeTripPanelDiagnostics(input: {
     missingCount,
     sourceCount,
     consultedSourceCount,
+    groundedFindingSourceCount,
     warnings: uniq,
     needsCreateConfirm,
     integrityLight,
@@ -473,6 +485,7 @@ export function buildTripPanelFromPackage(
     budgetConfidence?: string
     includeTechnicalJson?: boolean
     consultedSourceUrls?: string[]
+    groundedSourceUrls?: string[]
   },
 ): TripPanelModel {
   const flights = pkg.travelOptions.filter((o) => o.type === 'flight')
@@ -582,6 +595,7 @@ export function buildTripPanelFromPackage(
     cards,
     sourceUrls,
     consultedSourceUrls: opts?.consultedSourceUrls,
+    groundedSourceUrls: opts?.groundedSourceUrls,
     agentWarnings: filterNonEmptyWarnings(opts?.warnings),
     nights,
     hasOutboundFlight: flightsOut.length > 0,
@@ -678,6 +692,9 @@ export function buildTripPanelFromProposal(
     budgetConfidence: budget?.confidence,
     includeTechnicalJson: true,
     consultedSourceUrls: [...new Set(consultedSourceUrls)],
+    groundedSourceUrls: (proposal.researchDiagnostics?.candidates ?? [])
+      .filter((c) => c.decision === 'accepted' && c.reason === 'grounded_claim')
+      .map((c) => c.url),
   })
 }
 
@@ -805,5 +822,62 @@ export function buildTripPanelFromPersisted(input: {
     startAt: c.dueAt,
   }))
 
+  attachPersistedQuotes(model, options, bookings)
+
   return model
+}
+
+function findOption(
+  options: TravelOption[],
+  card: TripPanelCard,
+): TravelOption | undefined {
+  return options.find(
+    (o) => (o.externalId ?? o.id) === card.id || o.id === card.id,
+  )
+}
+
+/** Restore quote facts the package view hides, and fill the money line. */
+function attachPersistedQuotes(
+  model: TripPanelModel,
+  options: TravelOption[],
+  bookings: Booking[],
+): void {
+  const lists = [
+    model.flightsOut,
+    model.flightsReturn,
+    model.ground,
+    model.lodging,
+    model.activities,
+  ]
+  for (const list of lists) {
+    for (const card of list) {
+      const o = findOption(options, card)
+      if (!o) continue
+      if (o.checkedAt) card.checkedAt = o.checkedAt
+      if (o.nextAction) card.nextAction = o.nextAction
+      if (o.priceHistory?.length) card.priceHistory = o.priceHistory
+      if (o.budgetRole === 'pending') {
+        if (o.startAt) card.startAt = o.startAt
+        if (o.endAt) card.endAt = o.endAt
+      }
+      if (o.budgetRole === 'alternative' && card.status !== 'confirmed') {
+        card.status = 'alternative'
+        if (o.verificationStatus === 'verified' && o.sourceUrl) {
+          if (o.startAt) card.startAt = o.startAt
+          if (o.endAt) card.endAt = o.endAt
+          if (o.priceObserved !== undefined) {
+            card.price = o.priceObserved
+            card.currency = o.currency
+          }
+        }
+      }
+    }
+  }
+
+  const ledger = quoteLedger(options, bookings)
+  model.header.chosenSubtotal = ledger.subtotal
+  model.header.amountPaid = ledger.paid
+  model.header.amountDue = ledger.pending
+  model.header.unquotedCount = ledger.unquotedPending
+  model.header.ledgerCurrency = ledger.currency
 }

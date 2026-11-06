@@ -40,6 +40,12 @@ export function daysBetween(a?: string, b?: string): number | undefined {
   return Math.round((y - x) / 86400000)
 }
 
+/** YYYY-MM-DD plus n calendar days. */
+export function addDays(date: string, n: number): string {
+  const d = new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000)
+  return d.toISOString().slice(0, 10)
+}
+
 export function formatDuration(minutes?: number): string | undefined {
   if (minutes === undefined) return undefined
   const sign = minutes < 0 ? '−' : ''

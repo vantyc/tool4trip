@@ -8,6 +8,7 @@ import {
 } from './claims.ts'
 import {
   classifyAskIntent,
+  detectNoMutationDirective,
   formatTripDateEs,
   tryContextAnswer,
   buildContextOnlyDraft,
@@ -124,6 +125,114 @@ describe('intent routing', () => {
       'mutation',
     )
   })
+
+  it('negated mutation ("no crear/aplicar todavía") is research, not mutation', () => {
+    assert.equal(
+      classifyAskIntent('Compara opciones de hospedaje; no crear ni aplicar nada todavía'),
+      'research',
+    )
+    assert.equal(
+      classifyAskIntent('Investiga pero no modifiques el viaje ni agregues opciones'),
+      'research',
+    )
+  })
+
+  it('window change on an existing trip with research steps is a mutation', () => {
+    const p = [
+      'Adelanta el viaje: nueva ventana 2026-10-02 → 2026-10-08.',
+      'Quiero asistir a la serenata de las fiestas patronales en Pueblo Uno; verifica cuándo es con fuentes oficiales.',
+      'Investiga el vuelo de ida del 2 de octubre y conserva el regreso del 8.',
+      'Distingue claramente entre información verificada, estimada y pendiente de confirmar.',
+      '',
+      'Aplica estos cambios al viaje existente; no crees un viaje nuevo.',
+    ].join('\n')
+    assert.equal(detectNoMutationDirective(p), false)
+    assert.equal(classifyAskIntent(p, 'ask'), 'mutation')
+  })
+
+  it('guardrails on how to edit ("no elimines X solo porque…") keep a window change a mutation (a737a0ac)', () => {
+    const p = [
+      'Cambia la ventana del viaje a 2027-03-08 → 2027-03-15.',
+      'Actualiza el vuelo de ida, el hospedaje y el traslado para la nueva fecha; conserva el regreso.',
+      'No elimines componentes existentes sólo porque no aparezcan en una nueva búsqueda.',
+      'No inventes disponibilidad, precios, horarios ni eventos.',
+      'Distingue claramente lo verificado de lo pendiente de confirmar.',
+    ].join('\n')
+    assert.equal(detectNoMutationDirective(p), false)
+    assert.equal(classifyAskIntent(p, 'ask'), 'mutation')
+  })
+
+  it('a guardrail does not hide a real no-mutation directive in the same prompt', () => {
+    const p =
+      'No elimines componentes existentes sólo porque no aparezcan en una búsqueda. Por ahora no apliques cambios.'
+    assert.equal(detectNoMutationDirective(p), true)
+    assert.equal(classifyAskIntent(p, 'ask'), 'research')
+  })
+
+  it('research keywords + explicit "no apliques" stay research', () => {
+    assert.equal(
+      classifyAskIntent('Investiga con fuentes oficiales y dime qué cambios aplicarías; no apliques cambios todavía'),
+      'research',
+    )
+  })
+
+  it('"reorganiza el viaje…" is a mutation of the existing trip (b20fc5f7)', () => {
+    assert.equal(
+      classifyAskIntent(
+        'reorganiza el viaje saliendo mañana 1 de octubre, consigue los telefonos de hoteles en totatiche para ver si puedo hablar',
+        'ask',
+      ),
+      'mutation',
+    )
+    assert.equal(classifyAskIntent('Reorganizar el itinerario del sábado', 'ask'), 'mutation')
+    assert.equal(
+      classifyAskIntent('reorganiza el viaje pero no apliques cambios todavía', 'ask'),
+      'research',
+    )
+  })
+})
+
+describe('detectNoMutationDirective', () => {
+  const positives = [
+    'Primero investiga las próximas fiestas, no crees el viaje todavía',
+    'no modifiques nada, solo compara',
+    'Busca hoteles sin modificar el itinerario',
+    'antes de crear el viaje, averigua fechas',
+    'por ahora no apliques cambios',
+    'todavía no crees nada',
+    'no quiero que cambies el hospedaje',
+    "Research first, don't change the trip",
+    'Solo investiga la seguridad de la zona',
+    'no crees un viaje nuevo, solo investiga el programa',
+    'no apliques cambios a menos que yo lo confirme',
+    'no modifiques nada, solo porque quiero revisar primero; no guardes nada',
+  ]
+  for (const p of positives) {
+    it(`detects: ${p}`, () => {
+      assert.equal(detectNoMutationDirective(p), true)
+    })
+  }
+
+  const negatives = [
+    'vuelo MEX-GDL mañana',
+    'cambia el hospedaje al Hotel Centro',
+    'Crea un viaje a la playa del 3 al 6 de octubre',
+    'Primero busca vuelos y luego arma el itinerario',
+    'Vuelo directo, no cambiar de avión',
+    'Aplica estos cambios al viaje existente; no crees un viaje nuevo.',
+    'Modifica el viaje actual, no crees otro viaje',
+    'Actualiza el viaje con el vuelo de ida del 2; don\'t create a new trip',
+    'Cambia las fechas sin crear un viaje nuevo',
+    'Actualiza el hospedaje. No elimines componentes existentes sólo porque no aparezcan en una nueva búsqueda.',
+    'Cambia el vuelo de ida; no quites el regreso a menos que ya no exista.',
+    'Adelanta el viaje y no borres opciones guardadas salvo que queden fuera de la nueva ventana.',
+    "Update the lodging, but don't remove existing options just because a search misses them.",
+  ]
+  for (const p of negatives) {
+    it(`does not detect: ${p}`, () => {
+      assert.equal(detectNoMutationDirective(p), false)
+    })
+  }
 })
 
 describe('context-only answers', () => {

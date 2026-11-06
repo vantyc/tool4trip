@@ -15,11 +15,24 @@ import {
   UNKNOWN,
 } from '../../application/newTravelProposal'
 import { buildTripPanelFromProposal } from '../../application/tripPanel'
+import { PrintButton } from '../PrintButton'
 import { TripPanel } from '../tripPanel'
 import { useOnline } from '../useOnline'
 
 const CREATE_CONFIRM =
   'Esta propuesta contiene componentes pendientes o faltantes y no tiene fuentes verificables. Puedes guardarla como borrador para completarla después.\n\n¿Crear el viaje de todos modos?'
+
+/** Server answered with findings only (research_only): no ops, empty package. */
+function isResearchOnlyProposal(p: AgentProposal): boolean {
+  const pkg = p.package
+  return (
+    p.ops.length === 0 &&
+    pkg.travelOptions.length === 0 &&
+    pkg.itineraryItems.length === 0 &&
+    pkg.checklistItems.length === 0 &&
+    pkg.notes.length === 0
+  )
+}
 
 export function NewTravelPage() {
   const online = useOnline()
@@ -31,11 +44,13 @@ export function NewTravelPage() {
   const [error, setError] = useState<string | null>(null)
   const [proposal, setProposal] = useState<AgentProposal | null>(null)
   const [plan, setPlan] = useState<ImportUpdatePlan | null>(null)
+  const [submitted, setSubmitted] = useState<{ prompt: string; at: Date } | null>(null)
 
   const panel = useMemo(
     () => (proposal ? buildTripPanelFromProposal(proposal) : null),
     [proposal],
   )
+  const researchOnly = proposal ? isResearchOnlyProposal(proposal) : false
 
   async function handlePlan() {
     if (!prompt.trim()) return
@@ -44,10 +59,11 @@ export function NewTravelPage() {
     setProposal(null)
     setPlan(null)
     setJobStatus('queued')
+    const submittedPrompt = prompt.trim()
     try {
       const p = await newTravelAgent(
         services,
-        { prompt: prompt.trim() },
+        { prompt: submittedPrompt },
         {
           onProgress: (prog) => setJobStatus(prog.status),
         },
@@ -61,6 +77,7 @@ export function NewTravelPage() {
       })
       setProposal(prepared.proposal)
       setPlan(preview.plan)
+      setSubmitted({ prompt: submittedPrompt, at: new Date() })
       setJobStatus(null)
     } catch (err) {
       setError(formatAgentCaughtError(err))
@@ -71,7 +88,7 @@ export function NewTravelPage() {
   }
 
   async function handleCreate() {
-    if (!proposal || !panel) return
+    if (!proposal || !panel || researchOnly) return
     if (panel.diagnostics.needsCreateConfirm) {
       const ok = window.confirm(CREATE_CONFIRM)
       if (!ok) return
@@ -167,17 +184,32 @@ export function NewTravelPage() {
 
       {proposal && panel && (
         <div className="agent-proposal">
+          {submitted && (
+            <section className="print-only print-request">
+              <h2>Solicitud</h2>
+              <p className="muted small">
+                Propuesta generada el {submitted.at.toLocaleString('es-MX')}
+              </p>
+              <pre>{submitted.prompt}</pre>
+            </section>
+          )}
           <TripPanel
             model={panel}
             actions={
               <>
-                <button
-                  type="button"
-                  onClick={() => void handleCreate()}
-                  disabled={busy || !online}
-                >
-                  Crear viaje
-                </button>
+                {researchOnly ? (
+                  <span className="muted small">
+                    Investigación — nada que crear todavía
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleCreate()}
+                    disabled={busy || !online}
+                  >
+                    Crear viaje
+                  </button>
+                )}
                 <button type="button" onClick={handleDiscard} disabled={busy}>
                   Descartar
                 </button>
@@ -188,6 +220,7 @@ export function NewTravelPage() {
                 >
                   Reintentar
                 </button>
+                <PrintButton subject={panel.header.title} />
                 {plan && (
                   <span className="muted small">
                     Vista previa: +{plan.created} · ~{plan.updated} · ={plan.unchanged}

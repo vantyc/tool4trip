@@ -2,9 +2,11 @@ import { useParams } from 'react-router-dom'
 import { services } from '../../application'
 import type { ChecklistItem } from '../../domain/types'
 import { useCloudQuery } from '../useCloudQuery'
+import { useReadOnly } from '../useReadOnly'
 
 export function ChecklistPage() {
   const { tripId } = useParams<{ tripId: string }>()
+  const readOnly = useReadOnly()
 
   const { data: items = [], loading, error, reload } = useCloudQuery(
     tripId ? `checklist:${tripId}` : null,
@@ -38,6 +40,7 @@ export function ChecklistPage() {
                 <input
                   type="checkbox"
                   checked={item.status === 'done'}
+                  disabled={readOnly}
                   onChange={() => void toggle(item)}
                 />
                 <span className={item.status === 'done' ? 'done' : undefined}>

@@ -7,6 +7,11 @@ export const APP_BASE = '/'
 
 export default defineConfig({
   base: APP_BASE,
+  server: {
+    proxy: {
+      '/api': 'http://127.0.0.1:8080',
+    },
+  },
   plugins: [
     react(),
     VitePWA({
@@ -64,8 +69,16 @@ export default defineConfig({
           '**/*.{js,css,html,ico,png,svg,woff2,webmanifest}',
         ],
         navigateFallback: '/index.html',
-        // App navigations only — leave /api/* and /login to the network.
-        navigateFallbackDenylist: [/^\/api\//, /^\/login$/, /^\/logout$/],
+        // App navigations only. /api, /login and the other apps on this
+        // host must reach the network; otherwise this worker serves
+        // Tool4Trip's shell for /celestina and /pinalove.
+        navigateFallbackDenylist: [
+          /^\/api\//,
+          /^\/login$/,
+          /^\/logout$/,
+          /^\/celestina/,
+          /^\/pinalove/,
+        ],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,

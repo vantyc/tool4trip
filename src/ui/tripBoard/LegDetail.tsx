@@ -117,7 +117,7 @@ export function LegDetail({
                   {r.items.length > 1 ? `${r.items.length} partes · ` : ''}
                   {money(r.price, r.currency) ?? 'sin cotizar'}
                 </span>
-                <button type="button" disabled={busy} onClick={() => void run(chooseRoutePlan(leg, r.id))}>
+                <button type="button" data-write disabled={busy} onClick={() => void run(chooseRoutePlan(leg, r.id))}>
                   Elegir esta ruta
                 </button>
               </header>
@@ -130,8 +130,9 @@ export function LegDetail({
       )}
 
       {leg.alternatives.length > 0 && (
-        <details className="tb-more">
-          <summary>Alternativas guardadas ({leg.alternatives.length})</summary>
+        <section className="tb-sec">
+          <h3>Alternativas guardadas ({leg.alternatives.length})</h3>
+          <p className="tb-form-note">No cuentan en el subtotal. Precio comparado con lo elegido.</p>
           {leg.alternatives.map((a) => {
             const swap = canSwapAlternative(leg, a)
             const diff =
@@ -151,7 +152,7 @@ export function LegDetail({
                       </span>
                     )}
                     {swap ? (
-                      <button type="button" disabled={busy} onClick={() => void run(swapAlternativePlan(leg, a.id))}>
+                      <button type="button" data-write disabled={busy} onClick={() => void run(swapAlternativePlan(leg, a.id))}>
                         Usar en lugar del elegido
                       </button>
                     ) : (
@@ -164,7 +165,20 @@ export function LegDetail({
               />
             )
           })}
-        </details>
+        </section>
+      )}
+
+      {leg.related.length > 0 && (
+        <section className="tb-sec">
+          <h3>Opciones guardadas relacionadas ({leg.related.length})</h3>
+          <p className="tb-form-note">
+            Salen de {leg.fromLabel} o llegan a {leg.toLabel}, pero no cubren exactamente este tramo.
+            Sirven de referencia para cotizarlo.
+          </p>
+          {leg.related.map((r) => (
+            <ItemBlock key={r.id} item={r} compact onChanged={onChanged} getActionProps={getActionProps} />
+          ))}
+        </section>
       )}
 
       {leg.extras.length > 0 && (
@@ -192,7 +206,7 @@ export function LegDetail({
             }}
           />
         ) : (
-          <button type="button" className="tb-btn-quiet" onClick={() => setAdding(true)}>
+          <button type="button" className="tb-btn-quiet" data-write onClick={() => setAdding(true)}>
             Agregar opción para este tramo
           </button>
         )}

@@ -14,11 +14,13 @@ import {
   formatWhenEs,
   localDate,
 } from '../../application/tripBoard/time'
-import { AddStayForm } from './BoardForms'
+import { AddStayForm, ItemEditForm } from './BoardForms'
 import { kindLabel, STATUS_LABEL } from './boardFormat'
 import { ItemBlock, type GetActionProps } from './ItemBlock'
+import { MiniCalendar, type DayRange } from './MiniCalendar'
 import { PlaceImage } from './PlaceImage'
 import type { PlaceMedia } from './placeMedia'
+import { StayDates } from './StayDates'
 
 function legLine(leg: BoardLeg, end: 'arrive' | 'depart'): string {
   const seg = end === 'arrive' ? leg.segments.at(-1) : leg.segments[0]
@@ -32,12 +34,15 @@ function ArrivalDeparture({
   end,
   otherLabel,
   onOpenLeg,
+  onChanged,
 }: {
   leg?: BoardLeg
   end: 'arrive' | 'depart'
   otherLabel?: string
   onOpenLeg: (id: string) => void
+  onChanged: () => void
 }) {
+  const [editing, setEditing] = useState(false)
   if (!leg) return null
   const title = end === 'arrive' ? 'Llegada' : 'Salida'
   if (leg.segments.length === 0) {
@@ -47,7 +52,11 @@ function ArrivalDeparture({
         <p className="tb-pending-line">
           {end === 'arrive' ? `Desde ${leg.fromLabel}` : `Hacia ${leg.toLabel}`}
           {leg.dateHint ? ` · ${formatDayEs(leg.dateHint)}` : ''} — tramo por elegir
-          {leg.routes.length > 0 ? ` (${leg.routes.length} ${leg.routes.length === 1 ? 'opción' : 'opciones'})` : ' (sin opciones guardadas)'}
+          {leg.routes.length > 0
+            ? ` (${leg.routes.length} ${leg.routes.length === 1 ? 'opción' : 'opciones'})`
+            : leg.related.length > 0
+              ? ` (${leg.related.length} ${leg.related.length === 1 ? 'opción relacionada' : 'opciones relacionadas'})`
+              : ' (sin opciones guardadas)'}
         </p>
         <button type="button" className="tb-btn-quiet" onClick={() => onOpenLeg(leg.id)}>
           {end === 'arrive' ? 'Elegir cómo llegar' : 'Elegir cómo salir'}
@@ -87,9 +96,27 @@ function ArrivalDeparture({
           </dd>
         </div>
       </dl>
-      <button type="button" className="tb-btn-quiet" onClick={() => onOpenLeg(leg.id)}>
-        Ver {seg.kind === 'flight' ? 'vuelo' : 'tramo'}
-      </button>
+      {editing ? (
+        <ItemEditForm
+          item={seg}
+          onCancel={() => setEditing(false)}
+          onDone={() => {
+            setEditing(false)
+            onChanged()
+          }}
+        />
+      ) : (
+        <div className="tb-item-actions">
+          <button type="button" className="tb-btn-quiet" onClick={() => onOpenLeg(leg.id)}>
+            Ver {seg.kind === 'flight' ? 'vuelo' : 'tramo'} y alternativas
+          </button>
+          {(seg.option || seg.booking) && (
+            <button type="button" className="tb-btn-quiet" data-write onClick={() => setEditing(true)}>
+              Editar horario
+            </button>
+          )}
+        </div>
+      )}
     </section>
   )
 }
@@ -135,6 +162,23 @@ export function StopDetail({
   const stayFrom = localDate(stop.checkIn) ?? localDate(stop.arriveAt) ?? arrival?.dateHint
   const stayTo = localDate(stop.checkOut) ?? localDate(stop.departAt) ?? departure?.dateHint
 
+  const span = (from?: string, to?: string): DayRange | undefined =>
+    from ? { from, to: to && to > from ? to : from } : undefined
+  let mark: DayRange | undefined
+  let maybe: DayRange | undefined
+  if (stop.kind === 'origin') mark = span(localDate(stop.departAt))
+  else if (stop.kind === 'end') mark = span(localDate(stop.arriveAt))
+  else if (stop.kind === 'layover') mark = span(localDate(stop.arriveAt), localDate(stop.departAt))
+  else if (stop.datesPending) {
+    mark = span(localDate(stop.checkIn))
+    maybe = stop.window ?? span(stayFrom, stayTo)
+  } else mark = span(stayFrom, stayTo)
+  const { startDate, endDate, returnLimit } = board.summary
+  const tripSpan = span(startDate, endDate)
+  const limit = returnLimit && endDate && returnLimit > endDate ? returnLimit : undefined
+  const markLabel =
+    stop.kind === 'origin' ? 'salida' : stop.kind === 'end' ? 'regreso' : stop.kind === 'layover' ? 'escala' : 'estancia'
+
   const done: string[] = []
   const todo: string[] = []
   if (arrival) {
@@ -166,25 +210,26 @@ export function StopDetail({
         end="arrive"
         otherLabel={arrival?.fromLabel}
         onOpenLeg={onOpenLeg}
+        onChanged={onChanged}
       />
 
       <section className="tb-sec">
         <h3>{stop.kind === 'layover' ? 'Escala' : stop.kind === 'stay' ? 'Estancia' : stop.kind === 'origin' ? 'Inicio' : 'Fin del viaje'}</h3>
-        {stop.kind === 'layover' && (
-          <p>
-            Conexión de <strong>{formatDuration(stop.layoverMinutes)}</strong> en {stop.place?.airport ?? stop.label}. Sin hotel.
-          </p>
-        )}
-        {stop.kind === 'stay' && (
-          <p>
-            {stayFrom ? formatDayEs(stayFrom) : '¿?'} → {stayTo ? formatDayEs(stayTo) : '¿?'}
-            {stop.nights !== undefined && (
-              <> · <strong>{stop.nights} {stop.nights === 1 ? 'noche' : 'noches'}</strong></>
+        <div className="tb-when">
+          <div className="tb-when-text">
+            {stop.kind === 'layover' && (
+              <p>
+                Conexión de <strong>{formatDuration(stop.layoverMinutes)}</strong> en {stop.place?.airport ?? stop.label}. Sin hotel.
+              </p>
             )}
-          </p>
-        )}
-        {stop.kind === 'origin' && <p>Sales el {formatWhenEs(stop.departAt)}.</p>}
-        {stop.kind === 'end' && <p>Llegas el {formatWhenEs(stop.arriveAt)}.</p>}
+            {stop.kind === 'stay' && (
+              <StayDates stop={stop} board={board} onChanged={onChanged} fallbackOffset={fallbackOffset} />
+            )}
+            {stop.kind === 'origin' && <p>Sales el {formatWhenEs(stop.departAt)}.</p>}
+            {stop.kind === 'end' && <p>Llegas el {formatWhenEs(stop.arriveAt)}.</p>}
+          </div>
+          <MiniCalendar mark={mark} maybe={maybe} trip={tripSpan} limit={limit} markLabel={markLabel} />
+        </div>
       </section>
 
       {stop.kind === 'stay' && (
@@ -199,7 +244,7 @@ export function StopDetail({
               getActionProps={getActionProps}
               extraActions={
                 l.role !== 'chosen' && l.option ? (
-                  <button type="button" disabled={busy} onClick={() => void choose(l.id)}>
+                  <button type="button" data-write disabled={busy} onClick={() => void choose(l.id)}>
                     Elegir este hotel
                   </button>
                 ) : undefined
@@ -218,7 +263,7 @@ export function StopDetail({
                   getActionProps={getActionProps}
                   extraActions={
                     l.option ? (
-                      <button type="button" disabled={busy} onClick={() => void choose(l.id)}>
+                      <button type="button" data-write disabled={busy} onClick={() => void choose(l.id)}>
                         Elegir este hotel
                       </button>
                     ) : undefined
@@ -241,7 +286,7 @@ export function StopDetail({
               }}
             />
           ) : (
-            <button type="button" className="tb-btn-quiet" onClick={() => setAdding(true)}>
+            <button type="button" className="tb-btn-quiet" data-write onClick={() => setAdding(true)}>
               Agregar otro hotel para estas fechas
             </button>
           )}
@@ -253,6 +298,7 @@ export function StopDetail({
         end="depart"
         otherLabel={departure?.toLabel}
         onOpenLeg={onOpenLeg}
+        onChanged={onChanged}
       />
 
       {stop.extras.length > 0 && (

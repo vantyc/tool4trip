@@ -362,6 +362,58 @@ describe('tripPanel model', () => {
     )
   })
 
+  it('14b: research-only with a grounded finding is not presented as zero verified evidence', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    pkg.travelOptions = []
+    const url = 'https://www.villa-alba.example/Eventos/2019/7OctNoche2019.php'
+    const base: AgentProposal = {
+      proposalId: 'p-ro',
+      createdAt: '2026-09-29T12:00:00Z',
+      narrative: 'Investigación',
+      warnings: [],
+      diffSummary: [],
+      ops: [],
+      toolTrace: [
+        {
+          tool: 'fetchUrl',
+          args: { url },
+          ok: true,
+          sources: [{ url, snippet: '7 de Octubre del 2019' }],
+          checkedAt: '2026-09-29T12:00:00Z',
+        },
+      ],
+      package: pkg,
+    }
+    const diag = (reason: string, decision: 'accepted' | 'rejected') => ({
+      goals: [],
+      candidates: [{ url, goalIds: [], decision, reason }],
+      toolRounds: 1,
+      toolCallsUsed: 1,
+      maxToolCalls: 12,
+      forcedExtraRounds: 0,
+      consultedSourceCount: 1,
+      anchoredSourceCount: 0,
+    })
+    const grounded = buildTripPanelFromProposal({
+      ...base,
+      researchDiagnostics: diag('grounded_claim', 'accepted'),
+    })
+    assert.equal(grounded.diagnostics.sourceCount, 0, 'package anchoring unchanged')
+    assert.equal(grounded.diagnostics.groundedFindingSourceCount, 1)
+    assert.ok(!grounded.diagnostics.warnings.some((w) => /Ausencia de fuentes/.test(w)))
+    assert.ok(
+      grounded.diagnostics.warnings.some((w) =>
+        /Sin fuentes ancladas a entidades del paquete; 1 fuente\(s\) verificada\(s\) respaldan hallazgos/.test(w),
+      ),
+    )
+    const none = buildTripPanelFromProposal({
+      ...base,
+      researchDiagnostics: diag('insufficient_evidence', 'rejected'),
+    })
+    assert.equal(none.diagnostics.groundedFindingSourceCount, undefined)
+    assert.ok(none.diagnostics.warnings.some((w) => /Ausencia de fuentes/.test(w)))
+  })
+
   it('15: flight_schedule retains clocks and is HORARIO PUBLICADO (not fare)', () => {
     const pkg = loadPkg('estimated-no-sources.json')
     const flt = pkg.travelOptions.find((o) => o.type === 'flight')

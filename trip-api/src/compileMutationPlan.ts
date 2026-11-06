@@ -1,5 +1,9 @@
 import type { AgentOpRecord } from '../../shared/agentContracts.ts'
 import {
+  isLodgingCandidateNote,
+  LODGING_CANDIDATE_NOTE,
+} from '../../shared/lodgingCandidate.ts'
+import {
   extractIataCode,
   formatClockEs,
 } from './airportArrivalPolicy.ts'
@@ -32,6 +36,8 @@ export type LogicalRole =
   | 'flight_return'
   | 'lodging_primary'
   | 'lodging_fallback'
+  /** Researched lodging added next to the current one; never competes as primary. */
+  | 'lodging_candidate'
   | 'ground_transfer'
   | 'other'
 
@@ -193,13 +199,53 @@ export function inferLogicalRole(
   return 'other'
 }
 
+function flightRouteKey(o: OptView): string | undefined {
+  if (o.type !== 'flight') return undefined
+  const ori = extractIataCode(o.origin)
+  const dest = extractIataCode(o.destination)
+  return ori && dest ? `${ori}>${dest}` : undefined
+}
+
+/** Route → leg of the trip's current flights (only routes with a single leg). */
+function routeLegs(
+  curRoles: Map<LogicalRole, OptView[]>,
+): Map<string, LogicalRole> {
+  const map = new Map<string, LogicalRole>()
+  for (const role of ['flight_outbound', 'flight_return'] as const) {
+    for (const v of curRoles.get(role) ?? []) {
+      const key = flightRouteKey(v)
+      if (!key) continue
+      const prev = map.get(key)
+      map.set(key, prev && prev !== role ? 'other' : role)
+    }
+  }
+  return map
+}
+
+/**
+ * A proposed flight on a route the trip already flies keeps that leg, so a
+ * date inside the shifted window cannot flip its direction.
+ */
+function inferProposedRole(
+  o: OptView,
+  trip: { startDate: string; endDate: string; destination?: string },
+  legs?: Map<string, LogicalRole>,
+): LogicalRole {
+  const inferred = inferLogicalRole(o, trip)
+  if (o.logicalRole === inferred) return inferred
+  const key = flightRouteKey(o)
+  const known = key ? legs?.get(key) : undefined
+  return known && known !== 'other' ? known : inferred
+}
+
 function groupByRole(
   opts: OptView[],
   trip: { startDate: string; endDate: string; destination?: string },
+  legs?: Map<string, LogicalRole>,
 ): Map<LogicalRole, OptView[]> {
   const map = new Map<LogicalRole, OptView[]>()
   for (const o of opts) {
-    const role = inferLogicalRole(o, trip)
+    const role = inferProposedRole(o, trip, legs)
     const arr = map.get(role) ?? []
     arr.push(o)
     map.set(role, arr)
@@ -338,6 +384,25 @@ export function pickWindowAwarePrimary(
   return { status: 'empty' }
 }
 
+/** Same scheduled flight under another externalId (flight number or route + departure instant). */
+function sameScheduledFlight(a: OptView, b: OptView): boolean {
+  if (a.type !== 'flight' || b.type !== 'flight') return false
+  const day = datePrefix(a.startAt)
+  if (!day || day !== datePrefix(b.startAt)) return false
+  const fa = extractFlightNumberFromSourceUrl(a.sourceUrl)
+  const fb = extractFlightNumberFromSourceUrl(b.sourceUrl)
+  if (fa && fb) return fa === fb
+  const ta = Date.parse(a.startAt!)
+  const tb = Date.parse(b.startAt!)
+  return (
+    Number.isFinite(ta) &&
+    ta === tb &&
+    (extractIataCode(a.origin) ?? '') === (extractIataCode(b.origin) ?? '') &&
+    (extractIataCode(a.destination) ?? '') ===
+      (extractIataCode(b.destination) ?? '')
+  )
+}
+
 function lodgingFingerprint(o: OptView): string {
   return JSON.stringify([
     o.type,
@@ -415,6 +480,31 @@ export function extractFlightNumberFromSourceUrl(
   const m = sourceUrl.match(/[?&]flight=([A-Za-z0-9]+)/i)
   return m?.[1]?.toUpperCase()
 }
+
+/** Local day a date-bound schedule source is about (`date=2026-10-01`). */
+export function sourceUrlDay(sourceUrl: string | undefined): string | undefined {
+  return sourceUrl?.match(/[?&]date=(\d{4}-\d{2}-\d{2})(?![\d])/)?.[1]
+}
+
+/** A published schedule is evidence for one day only. */
+function isDateBoundFlight(o: { type?: string; sourceType?: string; sourceUrl?: string }): boolean {
+  return (
+    o.type === 'flight' &&
+    (o.sourceType === 'flight_schedule' || Boolean(sourceUrlDay(o.sourceUrl)))
+  )
+}
+
+/** Owned fields that belong to a schedule's day and must not survive a day change. */
+const RESCHEDULED_FLIGHT_FIELDS = [
+  'title',
+  'description',
+  'notes',
+  'provider',
+  'sourceType',
+  'sourceUrl',
+  'checkedAt',
+  'verificationStatus',
+] as const
 
 function formatDayMonthEs(isoWithOffset: string): string | undefined {
   const ymd = datePrefix(isoWithOffset)
@@ -494,6 +584,107 @@ export function syncLodgingNightsInTitle(
   const nights = lodgingNightsBetween(startAt, endAt)
   if (nights === null || nights < 1) return title
   return title.replace(LODGING_NIGHTS_RE, `${nights} noche(s)`)
+}
+
+/** Day kept by agent grounding when an unverified clock was stripped. */
+const DATE_HINT_RE = /(Fecha asociada \(sin hora verificada\):\s*)(\d{4}-\d{2}-\d{2})/i
+
+export type WindowFit =
+  | { kind: 'keep' }
+  | {
+      kind: 'rebind'
+      patch: Pick<Partial<PackageTravelOption>, 'startAt' | 'endAt' | 'notes'>
+      reason: string
+    }
+  | { kind: 'conflict'; reason: string }
+
+/**
+ * Fit a window-dependent component (lodging / ground transfer) to a trip date
+ * shift. A date moves only when it sat exactly on a trip boundary that moved:
+ * lodging covering the whole old stay takes the new boundaries, a transfer on
+ * the old arrival/departure day takes the new one; clock and offset are kept.
+ * No date → nothing stale → keep. A date the rule cannot place, or a protected
+ * / verified component that would move, is a conflict (never silently stale).
+ */
+export function fitToShiftedWindow(
+  o: Pick<
+    PackageTravelOption,
+    'externalId' | 'startAt' | 'endAt' | 'notes' | 'verificationStatus'
+  > & { status?: string; bookingId?: string | null },
+  role: LogicalRole,
+  from: { startDate: string; endDate: string },
+  to: { startDate: string; endDate: string },
+): WindowFit {
+  const startMoved = from.startDate !== to.startDate
+  const endMoved = from.endDate !== to.endDate
+  const inNew = (d: string) => d >= to.startDate && d <= to.endDate
+  const s = datePrefix(o.startAt)
+  const e = datePrefix(o.endAt)
+  const hint = o.notes?.match(DATE_HINT_RE)?.[2]
+  const patch: Pick<Partial<PackageTravelOption>, 'startAt' | 'endAt' | 'notes'> = {}
+  const retag = (day: string) => {
+    if (o.notes && hint) patch.notes = o.notes.replace(DATE_HINT_RE, `$1${day}`)
+  }
+  const unplaceable = (dates: string) => ({
+    kind: 'conflict' as const,
+    reason: `${o.externalId} ${dates} is outside new window ${to.startDate}→${to.endDate} and not on a moved trip boundary — dates cannot be derived (review)`,
+  })
+
+  if (role === 'lodging_primary' || role === 'lodging_fallback') {
+    if (s || e) {
+      const wholeStay =
+        (!s || s === from.startDate) && (!e || e === from.endDate)
+      if (wholeStay) {
+        if (s && startMoved) patch.startAt = rebindIsoDateKeepingTime(o.startAt, to.startDate)
+        if (e && endMoved) patch.endAt = rebindIsoDateKeepingTime(o.endAt, to.endDate)
+        if (hint === from.startDate && startMoved) retag(to.startDate)
+      } else if ((s && !inNew(s)) || (e && !inNew(e))) {
+        return unplaceable(`${s || '?'}→${e || '?'}`)
+      }
+    } else if (hint) {
+      if (hint === from.startDate && startMoved) retag(to.startDate)
+      else if (!inNew(hint)) return unplaceable(hint)
+    }
+  } else if (role === 'ground_transfer') {
+    const d = s || hint
+    if (d) {
+      const target =
+        d === from.startDate && startMoved
+          ? to.startDate
+          : d === from.endDate && endMoved
+            ? to.endDate
+            : undefined
+      if (target) {
+        if (s) patch.startAt = rebindIsoDateKeepingTime(o.startAt, target)
+        if (e) {
+          if (e !== d) return unplaceable(`${s}→${e}`)
+          patch.endAt = rebindIsoDateKeepingTime(o.endAt, target)
+        }
+        if (hint === d) retag(target)
+      } else if (!inNew(d)) {
+        return unplaceable(d)
+      }
+    }
+  }
+
+  if (!Object.keys(patch).length) return { kind: 'keep' }
+  if (isProtectedTravelOption(o)) {
+    return {
+      kind: 'conflict',
+      reason: `cannot move protected ${o.externalId} (status=${o.status ?? ''}) to the new window — review`,
+    }
+  }
+  if (o.verificationStatus === 'verified') {
+    return {
+      kind: 'conflict',
+      reason: `${o.externalId} was verified for the old dates — re-verify for ${to.startDate}→${to.endDate} (review)`,
+    }
+  }
+  return {
+    kind: 'rebind',
+    patch,
+    reason: `window shift ${from.startDate}→${from.endDate} ⇒ ${to.startDate}→${to.endDate}: ${role} dates follow the moved trip boundary`,
+  }
 }
 
 const WEAK_SOURCE: Record<string, number> = {
@@ -1088,7 +1279,8 @@ export function compileMutationPlan(args: {
     ...currentTrip,
     // Prefer route inference; window classification is separate
   })
-  const propRoles = groupByRole(proposedViews, proposedTrip)
+  const legs = routeLegs(curRoles)
+  const propRoles = groupByRole(proposedViews, proposedTrip, legs)
 
   const proposedById = new Map(proposedViews.map((o) => [o.externalId, o]))
   const currentById = new Map(currentViews.map((o) => [o.externalId, o]))
@@ -1115,6 +1307,10 @@ export function compileMutationPlan(args: {
   const removeCurrentIds = new Set<string>()
   /** Same-id updates that should NOT treat proposed dates as authoritative. */
   const preserveTemporalIds = new Set<string>()
+  /** Same-id flights moved to another day by a schedule for that day. */
+  const rescheduledFlightIds = new Set<string>()
+  /** Same-id flights moved to another day with no schedule for it: rewrite ignored. */
+  const ignoredFlightRewriteIds = new Set<string>()
 
   const pushSupersede = (
     from: OptView,
@@ -1249,6 +1445,203 @@ export function compileMutationPlan(args: {
     }
   }
 
+  const llmReplaceHint = (externalId: string): boolean =>
+    llmOps.some(
+      (op) =>
+        op.entityKind === 'travelOption' &&
+        ((op.op === 'remove' && op.externalId === externalId) ||
+          (op.op === 'supersede' &&
+            op.supersedesExternalId === externalId &&
+            op.externalId !== externalId)),
+    )
+
+  /**
+   * A same-id flight moved to another day: a date-bound schedule may only move
+   * with a schedule for the new day (its provenance then replaces the old one);
+   * otherwise the rewrite is ignored and the current flight is left as is.
+   */
+  const flightDayMove = (
+    c: OptView,
+    p: OptView,
+  ): 'same_day' | 'rescheduled' | 'unsupported' => {
+    const fromDay = datePrefix(c.startAt)
+    const toDay = datePrefix(p.startAt)
+    if (
+      c.externalId !== p.externalId ||
+      !isDateBoundFlight(c) ||
+      !fromDay ||
+      !toDay ||
+      fromDay === toDay
+    ) {
+      return 'same_day'
+    }
+    if (sourceUrlDay(p.sourceUrl) === toDay) {
+      rescheduledFlightIds.add(p.externalId)
+      return 'rescheduled'
+    }
+    warnings.push(
+      `${p.externalId} moved ${fromDay}→${toDay} without a schedule for ${toDay} — the ${fromDay} schedule is not carried to another day`,
+    )
+    ignoredFlightRewriteIds.add(p.externalId)
+    return 'unsupported'
+  }
+
+  /** Single-flight leg whose same-id rewrite was ignored: drop it if the leg moved off its day. */
+  const settleIgnoredFlightRewrite = (
+    c: OptView,
+    role: 'flight_outbound' | 'flight_return',
+    anchorMoved: boolean,
+    anchor: string,
+  ) => {
+    if (anchorMoved && datePrefix(c.startAt) !== anchor) {
+      pushRemove(
+        c.externalId,
+        role,
+        `date-shift: ${role} schedule of ${datePrefix(c.startAt)} has no schedule for ${anchor}`,
+      )
+      return
+    }
+    keepProposedIds.add(c.externalId)
+    preserveTemporalIds.add(c.externalId)
+  }
+
+  /**
+   * Several options for the same flight leg are alternatives, matched as a set
+   * (never by electing one "current" primary). Proposed alternatives update
+   * (same id) or are added; a proposed copy of a current flight keeps the
+   * current id; a proposed alternative outside the target window is dropped.
+   * A current alternative the proposal omits is replaced when it is outside
+   * the window, when the leg's anchor date moved and it is neither on the new
+   * anchor day nor on a day of a genuinely new alternative, or when an
+   * explicit remove/supersede op names it; otherwise
+   * it is kept (no implicit delete). New alternatives next to kept in-window
+   * ones on an unmoved anchor are ambiguous (replacement vs addition).
+   */
+  const reconcileFlightLeg = (
+    role: 'flight_outbound' | 'flight_return',
+    cur: OptView[],
+    propAll: OptView[],
+    anchorMoved: boolean,
+    anchor: string,
+  ) => {
+    const matched = new Set<string>()
+    const prop: OptView[] = []
+    for (const p of propAll) {
+      if (classifyWindow(p, window) !== 'OUT_OF_WINDOW') {
+        prop.push(p)
+        continue
+      }
+      if (currentById.has(p.externalId)) {
+        matched.add(p.externalId)
+        pushRemove(
+          p.externalId,
+          role,
+          `proposed ${role} alternative outside window ${window.startDate}→${window.endDate}`,
+        )
+      } else {
+        warnings.push(
+          `proposed ${role} ${p.externalId} is outside window ${window.startDate}→${window.endDate} — dropped`,
+        )
+      }
+    }
+    const added: OptView[] = []
+    for (const p of prop) {
+      const sameId = cur.find((c) => c.externalId === p.externalId)
+      if (sameId) {
+        if (flightDayMove(sameId, p) === 'unsupported') continue
+        matched.add(sameId.externalId)
+        pushSupersede(sameId, p, role, `${role} alternative update`)
+        continue
+      }
+      const dup = cur.find(
+        (c) => !matched.has(c.externalId) && sameScheduledFlight(c, p),
+      )
+      if (dup) {
+        matched.add(dup.externalId)
+        keepProposedIds.add(dup.externalId)
+        preserveTemporalIds.add(dup.externalId)
+        warnings.push(
+          `${p.externalId} repeats current ${role} ${dup.externalId} — keeping ${dup.externalId}`,
+        )
+        matching.push({
+          role,
+          action: 'keep_alt',
+          from: p.externalId,
+          to: dup.externalId,
+          reason: 'proposed alternative is the same scheduled flight',
+        })
+        continue
+      }
+      added.push(p)
+    }
+    const coveredDays = new Set(
+      [anchor, ...added.map((p) => datePrefix(p.startAt))].filter(Boolean),
+    )
+    const kept: OptView[] = []
+    for (const c of cur) {
+      if (matched.has(c.externalId)) continue
+      const w = classifyWindow(c, window)
+      const offNewSet =
+        anchorMoved && prop.length > 0 && !coveredDays.has(datePrefix(c.startAt))
+      if (w === 'OUT_OF_WINDOW' || offNewSet || llmReplaceHint(c.externalId)) {
+        pushRemove(
+          c.externalId,
+          role,
+          offNewSet
+            ? `date-shift: ${role} alternatives replaced as a set`
+            : w === 'OUT_OF_WINDOW'
+              ? `obsolete ${role} alternative outside the window`
+              : `llm remove/supersede op: obsolete ${role} alternative`,
+        )
+        continue
+      }
+      kept.push(c)
+    }
+    const keptInWindow = kept.filter(
+      (c) => classifyWindow(c, window) === 'IN_WINDOW',
+    )
+    if (!anchorMoved && added.length && keptInWindow.length) {
+      conflicts.push(
+        `ambiguous ${role}: new ${added.map((p) => p.externalId).join(', ')} next to current ${keptInWindow.map((c) => c.externalId).join(', ')} — replacement or additional alternative?`,
+      )
+      return
+    }
+    for (const p of added) {
+      pushAdd(
+        p.externalId,
+        role,
+        anchorMoved ? `date-shift: new ${role} alternative` : `new ${role} alternative`,
+      )
+    }
+    for (const c of kept) {
+      keepProposedIds.add(c.externalId)
+      preserveTemporalIds.add(c.externalId)
+      matching.push({
+        role,
+        action: 'keep_alt',
+        to: c.externalId,
+        reason: `${role} alternative still valid — kept`,
+      })
+    }
+  }
+
+  const warnLegOffAnchor = (
+    role: 'flight_outbound' | 'flight_return',
+    cur: OptView[],
+    anchorMoved: boolean,
+    anchor: string,
+  ) => {
+    if (!anchorMoved) return
+    const off = cur.filter((c) => {
+      const d = datePrefix(c.startAt)
+      return d && d !== anchor
+    })
+    if (!off.length) return
+    warnings.push(
+      `${role} ${off.map((c) => c.externalId).join(', ')} not on new date ${anchor} — kept because the proposal has no replacement (no implicit delete)`,
+    )
+  }
+
   // --- Flights outbound (window-aware) ---
   {
     const curAll = matchableCurrent(curRoles.get('flight_outbound') ?? [])
@@ -1256,17 +1649,22 @@ export function compileMutationPlan(args: {
     const pick = pickWindowAwarePrimary(curAll, window, 'flight_outbound', {
       allowOutOfWindowPrimary: shift,
     })
+    const anchorMoved = currentTrip.startDate !== proposedTrip.startDate
 
-    if (prop.length > 1) {
-      conflicts.push(
-        `ambiguous flight_outbound in proposal: ${prop.map((p) => p.externalId).join(', ')}`,
+    if (prop.length > 1 || (prop.length === 1 && pick.status === 'ambiguous')) {
+      reconcileFlightLeg(
+        'flight_outbound',
+        curAll,
+        prop,
+        anchorMoved,
+        proposedTrip.startDate,
       )
-    } else if (pick.status === 'ambiguous') {
-      conflicts.push(pick.reason)
     } else if (prop.length === 1 && pick.status === 'ok') {
       const c = pick.primary
       const p = prop[0]!
-      if (isProtectedTravelOption(c) && c.externalId !== p.externalId) {
+      if (flightDayMove(c, p) === 'unsupported') {
+        settleIgnoredFlightRewrite(c, 'flight_outbound', anchorMoved, proposedTrip.startDate)
+      } else if (isProtectedTravelOption(c) && c.externalId !== p.externalId) {
         conflicts.push(`cannot supersede protected outbound ${c.externalId}`)
       } else if (shift || c.externalId !== p.externalId) {
         pushSupersede(
@@ -1292,6 +1690,7 @@ export function compileMutationPlan(args: {
       warnings.push(
         'proposed package has no outbound flight — leaving current outbound (no implicit delete)',
       )
+      warnLegOffAnchor('flight_outbound', curAll, anchorMoved, proposedTrip.startDate)
       if (pick.status === 'ok') {
         keepProposedIds.add(pick.primary.externalId)
         preserveTemporalIds.add(pick.primary.externalId)
@@ -1309,19 +1708,29 @@ export function compileMutationPlan(args: {
     const propPick = pickWindowAwarePrimary(propAll, window, 'flight_return', {
       allowOutOfWindowPrimary: false,
     })
-
-    if (propPick.status === 'ambiguous') {
-      conflicts.push(propPick.reason)
-    }
+    const anchorMoved = currentTrip.endDate !== proposedTrip.endDate
 
     if (
+      propAll.length > 1 ||
+      (propAll.length === 1 && curPick.status === 'ambiguous')
+    ) {
+      reconcileFlightLeg(
+        'flight_return',
+        curAll,
+        propAll,
+        anchorMoved,
+        proposedTrip.endDate,
+      )
+    } else if (
       !conflicts.some((c) => /flight_return/.test(c)) &&
       propPick.status === 'ok' &&
       curPick.status === 'ok'
     ) {
       const curPrimary = curPick.primary
       const propPrimary = propPick.primary
-      if (
+      if (flightDayMove(curPrimary, propPrimary) === 'unsupported') {
+        settleIgnoredFlightRewrite(curPrimary, 'flight_return', anchorMoved, proposedTrip.endDate)
+      } else if (
         isProtectedTravelOption(curPrimary) &&
         curPrimary.externalId !== propPrimary.externalId
       ) {
@@ -1396,12 +1805,80 @@ export function compileMutationPlan(args: {
       warnings.push(
         'proposed package has no return flight — leaving current returns (no implicit delete)',
       )
+      warnLegOffAnchor('flight_return', curAll, anchorMoved, proposedTrip.endDate)
       if (curPick.status === 'ok') {
         keepProposedIds.add(curPick.primary.externalId)
         preserveTemporalIds.add(curPick.primary.externalId)
       }
-    } else if (curPick.status === 'ambiguous') {
-      conflicts.push(curPick.reason)
+    }
+  }
+
+  // --- Lodging candidates (additive research) ---
+  // A new lodging the model explicitly adds while no op replaces the current
+  // lodging is a researched alternative: it is added next to the current
+  // lodging instead of competing with it for lodging_primary.
+  const lodgingRoles = ['lodging_primary', 'lodging_fallback'] as const
+  const curCandidates = lodgingRoles
+    .flatMap((r) => curRoles.get(r) ?? [])
+    .filter(
+      (o) =>
+        isLodgingCandidateNote(o.notes) &&
+        o.status === 'researched' &&
+        !isProtectedTravelOption(o),
+    )
+  const curCandidateIds = new Set(curCandidates.map((o) => o.externalId))
+  const candidateIds = new Set<string>()
+  {
+    for (const r of lodgingRoles) {
+      curRoles.set(
+        r,
+        (curRoles.get(r) ?? []).filter((o) => !curCandidateIds.has(o.externalId)),
+      )
+    }
+    const curLodging = lodgingRoles.flatMap((r) =>
+      matchableCurrent(curRoles.get(r) ?? []),
+    )
+    const explicitAdds = new Set(
+      llmOps
+        .filter((op) => op.op === 'add' && op.entityKind === 'travelOption')
+        .map((op) => op.externalId),
+    )
+    const replacesCurrent = curLodging.some((c) => llmReplaceHint(c.externalId))
+    const dropped = new Set<string>()
+    if (curLodging.length > 0 && !replacesCurrent) {
+      const currentTitles = new Set(curLodging.map((o) => normText(o.title).trim()))
+      const candidateTitles = new Set(
+        curCandidates.map((o) => normText(o.title).trim()),
+      )
+      for (const r of lodgingRoles) {
+        for (const p of propRoles.get(r) ?? []) {
+          if (!explicitAdds.has(p.externalId) || currentById.has(p.externalId)) continue
+          if (p.logicalRole || p.verificationStatus === 'verified') continue
+          if (isProtectedTravelOption(p)) continue
+          const key = normText(p.title).trim()
+          if (!key || currentTitles.has(key)) continue
+          if (candidateTitles.has(key)) {
+            dropped.add(p.externalId)
+            warnings.push(
+              `lodging candidate ${p.externalId} repeats "${p.title}" — not added twice`,
+            )
+            continue
+          }
+          candidateTitles.add(key)
+          candidateIds.add(p.externalId)
+        }
+      }
+    }
+    for (const r of lodgingRoles) {
+      propRoles.set(
+        r,
+        (propRoles.get(r) ?? []).filter(
+          (p) =>
+            !candidateIds.has(p.externalId) &&
+            !dropped.has(p.externalId) &&
+            !curCandidateIds.has(p.externalId),
+        ),
+      )
     }
   }
 
@@ -1520,6 +1997,23 @@ export function compileMutationPlan(args: {
     }
   }
 
+  for (const id of candidateIds) {
+    pushAdd(
+      id,
+      'lodging_candidate',
+      'researched lodging candidate — current lodging kept',
+    )
+  }
+  for (const c of curCandidates) {
+    const p = proposedById.get(c.externalId)
+    if (p) {
+      pushSupersede(c, p, 'lodging_candidate', 'lodging candidate update')
+    } else if (!llmRemoveHint(c.externalId)) {
+      keepProposedIds.add(c.externalId)
+      preserveTemporalIds.add(c.externalId)
+    }
+  }
+
   // --- Ground transfer ---
   {
     const cur = matchableCurrent(curRoles.get('ground_transfer') ?? [])
@@ -1594,6 +2088,23 @@ export function compileMutationPlan(args: {
     )
   }
 
+  // An update op names a current option but the package carries no values for
+  // it. Without a window shift nothing derives the change → review. With a
+  // shift, window-dependent dates are realigned below.
+  const payloadlessUpdates = new Set<string>()
+  for (const hint of llmOps) {
+    if (hint.op !== 'update' || hint.entityKind !== 'travelOption') continue
+    if (!currentById.has(hint.externalId) || proposedById.has(hint.externalId)) continue
+    if (removeCurrentIds.has(hint.externalId)) continue
+    if (!shift) {
+      conflicts.push(
+        `update op for ${hint.externalId} has no package entry — the intended change cannot be derived (review)`,
+      )
+    } else {
+      payloadlessUpdates.add(hint.externalId)
+    }
+  }
+
   if (conflicts.length) {
     return {
       status: 'review_required',
@@ -1604,8 +2115,6 @@ export function compileMutationPlan(args: {
       matching,
     }
   }
-
-  const canonicalOps = canonicalOpOrder(ops)
 
   // Normalize package: winners + field preservation from current
   const normalizedOptions: PackageTravelOption[] = []
@@ -1624,7 +2133,29 @@ export function compileMutationPlan(args: {
     const cur = currentOptions.find(
       (o) => o.tripId === tripId && (o.externalId ?? o.id) === id,
     )
+    if (cur && ignoredFlightRewriteIds.has(id)) {
+      pushPkgOpt(currentToPackageOption(cur))
+      continue
+    }
     if (fromProp && cur) {
+      if (rescheduledFlightIds.has(id)) {
+        const merged = mergePreservedPackageOption(cur, fromProp, {
+          allowTemporalReplace: true,
+          changedFields: RESCHEDULED_FLIGHT_FIELDS,
+        })
+        const hintDay = merged.notes?.match(DATE_HINT_RE)?.[2]
+        pushPkgOpt({
+          ...merged,
+          title:
+            buildFlightScheduleTitle(merged) ??
+            (cleanProposedText(fromProp.title)?.trim() || merged.title),
+          notes:
+            hintDay && hintDay !== datePrefix(merged.startAt)
+              ? merged.notes!.replace(DATE_HINT_RE, '').replace(/\s+/g, ' ').trim() || undefined
+              : merged.notes,
+        })
+        continue
+      }
       pushPkgOpt(
         mergePreservedPackageOption(cur, fromProp, {
           allowTemporalReplace: !preserveTemporalIds.has(id) && shift,
@@ -1647,9 +2178,105 @@ export function compileMutationPlan(args: {
 
   for (const o of proposedPackage.travelOptions) {
     if (seen.has(o.externalId)) continue
-    const role = inferLogicalRole(toView(o, o.externalId), proposedTrip)
+    const role = inferProposedRole(toView(o, o.externalId), proposedTrip, legs)
     if (role === 'other') pushPkgOpt(scrubNewPackageOption(o))
   }
+
+  for (let i = 0; i < normalizedOptions.length; i++) {
+    const o = normalizedOptions[i]!
+    const srcDay = sourceUrlDay(o.sourceUrl)
+    const day = datePrefix(o.startAt)
+    if (o.type !== 'flight' || !srcDay || !day || srcDay === day) continue
+    warnings.push(
+      `${o.externalId} departs ${day} but its source is for ${srcDay} — provenance dropped, not a published schedule for ${day}`,
+    )
+    normalizedOptions[i] = {
+      ...o,
+      sourceType: 'agent',
+      sourceUrl: undefined,
+      checkedAt: undefined,
+      verificationStatus: 'unverified',
+    }
+  }
+
+  for (let i = 0; i < normalizedOptions.length; i++) {
+    const o = normalizedOptions[i]!
+    if (!candidateIds.has(o.externalId) && !curCandidateIds.has(o.externalId)) continue
+    if (isLodgingCandidateNote(o.notes)) continue
+    normalizedOptions[i] = {
+      ...o,
+      notes: o.notes ? `${o.notes}\n${LODGING_CANDIDATE_NOTE}` : LODGING_CANDIDATE_NOTE,
+    }
+  }
+
+  // Window-dependent components kept from the current trip must follow an
+  // explicit window shift (or block Apply) — never stay silently on old dates.
+  if (shift) {
+    for (let i = 0; i < normalizedOptions.length; i++) {
+      const o = normalizedOptions[i]!
+      const cur = currentById.get(o.externalId)
+      if (!cur || curCandidateIds.has(o.externalId)) continue
+      const role = inferLogicalRole(cur, currentTrip)
+      if (
+        role !== 'lodging_primary' &&
+        role !== 'lodging_fallback' &&
+        role !== 'ground_transfer'
+      ) {
+        continue
+      }
+      const fit = fitToShiftedWindow(
+        { ...o, status: cur.status, bookingId: cur.bookingId },
+        role,
+        currentTrip,
+        window,
+      )
+      if (fit.kind === 'conflict') {
+        conflicts.push(fit.reason)
+        continue
+      }
+      if (fit.kind === 'keep') {
+        if (payloadlessUpdates.has(o.externalId)) {
+          warnings.push(
+            `update op for ${o.externalId} has no package entry — no window-dependent date to move; kept as is`,
+          )
+        }
+        continue
+      }
+      const next = { ...o, ...fit.patch }
+      if (o.type === 'lodging') {
+        next.title = syncLodgingNightsInTitle(next.title, next.startAt, next.endAt)
+      }
+      normalizedOptions[i] = next
+      if (!ops.some((op) => op.externalId === o.externalId && op.op !== 'remove')) {
+        ops.push({
+          op: 'update',
+          entityKind: 'travelOption',
+          externalId: o.externalId,
+          note: fit.reason,
+        })
+      }
+      matching.push({ role, action: 'realign', to: o.externalId, reason: fit.reason })
+    }
+    for (const id of payloadlessUpdates) {
+      if (!seen.has(id)) {
+        warnings.push(
+          `update op for ${id} has no package entry and is not window-dependent — kept as is`,
+        )
+      }
+    }
+    if (conflicts.length) {
+      return {
+        status: 'review_required',
+        ops: [],
+        package: proposedPackage,
+        warnings,
+        conflicts,
+        matching,
+      }
+    }
+  }
+
+  const canonicalOps = canonicalOpOrder(ops)
 
   const normalizedPkg: TripPackageV1 = {
     ...proposedPackage,

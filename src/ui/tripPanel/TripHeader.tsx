@@ -4,6 +4,12 @@ import type {
   TripPanelHeader,
 } from '../../application/tripPanel'
 
+function formatMxn(amount: number): string {
+  return new Intl.NumberFormat('es-MX', {
+    maximumFractionDigits: 2,
+  }).format(amount)
+}
+
 const LIGHT_LABEL: Record<IntegrityLight, string> = {
   green: 'Integridad alta',
   amber: 'Integridad media',
@@ -65,6 +71,36 @@ export function TripHeader({
             </dd>
           </div>
         )}
+        {header.chosenSubtotal !== undefined && (
+          <div>
+            <dt>Subtotal elegido</dt>
+            <dd>
+              {formatMxn(header.chosenSubtotal)}
+              {header.ledgerCurrency ? ` ${header.ledgerCurrency}` : ''}
+            </dd>
+          </div>
+        )}
+        {header.amountPaid !== undefined && (
+          <div>
+            <dt>Pagado</dt>
+            <dd>
+              {formatMxn(header.amountPaid)}
+              {header.ledgerCurrency ? ` ${header.ledgerCurrency}` : ''}
+            </dd>
+          </div>
+        )}
+        {header.amountDue !== undefined && (
+          <div>
+            <dt>Pendiente</dt>
+            <dd>
+              {formatMxn(header.amountDue)}
+              {header.ledgerCurrency ? ` ${header.ledgerCurrency}` : ''}
+              {header.unquotedCount
+                ? ` · ${header.unquotedCount} sin cotización`
+                : ''}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Progreso</dt>
           <dd>
@@ -106,7 +142,7 @@ export function IntegritySummary({
       </div>
       <ul className="tp-integrity-counts">
         <li>
-          <strong>{diagnostics.verifiedCount}</strong> verificados
+          <strong>{diagnostics.verifiedCount}</strong> con fuente
         </li>
         <li>
           <strong>{diagnostics.pendingCount}</strong> pendientes
@@ -115,8 +151,13 @@ export function IntegritySummary({
           <strong>{diagnostics.missingCount}</strong> faltantes
         </li>
         <li>
-          <strong>{diagnostics.sourceCount}</strong> fuentes
+          <strong>{diagnostics.sourceCount}</strong> fuentes ancladas
         </li>
+        {(diagnostics.groundedFindingSourceCount ?? 0) > 0 && (
+          <li>
+            <strong>{diagnostics.groundedFindingSourceCount}</strong> con hallazgo verificado
+          </li>
+        )}
         {diagnostics.consultedSourceCount !== undefined &&
           diagnostics.consultedSourceCount > diagnostics.sourceCount && (
             <li className="muted">

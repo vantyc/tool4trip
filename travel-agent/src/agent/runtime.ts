@@ -16,6 +16,7 @@ import type {
   ChatCompletionResult,
   ChatMessage,
   LLMProvider,
+  ToolCall,
 } from '../llm/types.ts'
 import { logJobEvent } from '../jobs/log.ts'
 import { ToolRegistry } from '../tools/registry.ts'
@@ -24,13 +25,23 @@ import {
   buildFinalProposalPrompt,
   buildNewTravelUserNudge,
   buildRepairPrompt,
+  buildResearchOnlyFinalPrompt,
   buildSystemPrompt,
 } from './prompts.ts'
-import { assertDraftGrounded, scrubUngroundedConcreteFields } from './claims.ts'
+import {
+  assertDraftGrounded,
+  scrubUngroundedConcreteFields,
+  type GroundingSuccess,
+} from './claims.ts'
+import { renderToolContentForModel } from './evidenceRefs.ts'
+import {
+  buildContactFollowUpNote,
+  contactFollowUpUrls,
+  userAskedForContact,
+} from './contactFollowUp.ts'
 import {
   buildDirectedResearchNudge,
   buildResearchDiagnostics,
-  deriveResearchGoals,
   extractTripDatesFromPrompt,
   scrubUnsupportedFreeTextAssertions,
   shouldForceAnotherResearchRound,
@@ -42,8 +53,29 @@ import {
 import {
   buildContextOnlyDraft,
   classifyAskIntent,
+  detectNoMutationDirective,
   tryContextAnswer,
+  type AskIntent,
 } from './intent.ts'
+import {
+  assessPlannerGoals,
+  buildPlannerNudge,
+  buildResearchTransitionNote,
+  computePlannerState,
+  decideResponseShape,
+  deriveResearchPlan,
+  plannedCallLevel,
+  planToolCallDecision,
+  filterUnresearchedNegativeWarnings,
+  nextRequiredResearchAction,
+  pendingGoalWarnings,
+  requiredActionMessage,
+  shouldForcePlannerRound,
+  toResearchOnlyDraft,
+  type PlannerState,
+  type ResearchDimension,
+  type ResearchPlan,
+} from './researchPlanner.ts'
 import { enrichPackageWithAirportArrivals } from './airportArrivalEnrich.ts'
 import { mergePublishedSchedulesFromTrace } from '../flights/mergeSchedules.ts'
 import {
@@ -54,6 +86,8 @@ import {
 import {
   collectNewTravelServerWarnings,
   ensureNewTravelSkeleton,
+  markTentativeTripWindow,
+  webResearchWarnings,
 } from './newTravelCoherence.ts'
 import { agentProposalStructuredResponseFormat } from './proposalSchema.ts'
 
@@ -90,6 +124,59 @@ export type AgentRuntimeDeps = {
 
 function nowIso(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, '+00:00')
+}
+
+/**
+ * An explicit change to an existing trip already fixes the destination (the
+ * trip's) and the dates (the user's). The event is still researched and kept
+ * pending, but it no longer turns the answer into research-only — otherwise
+ * the requested window change is silently dropped.
+ */
+export function ungateEventForExistingTripMutation(
+  plan: ResearchPlan,
+  intent: AskIntent,
+  req: Pick<AgentAskRequest, 'mode' | 'context'>,
+): ResearchPlan {
+  if (intent !== 'mutation' || req.mode === 'new_travel') return plan
+  if (plan.destinationSelection) return plan
+  const trip = asRecord(req.context.trip)
+  if (!str(trip.id) || !str(trip.startDate)) return plan
+  return {
+    ...plan,
+    goals: plan.goals.map((g) =>
+      g.kind === 'event_discovery' && g.decisionCritical
+        ? { ...g, decisionCritical: false }
+        : g,
+    ),
+  }
+}
+
+/**
+ * Package that owns the trip's current options (most options win), else the
+ * highest-revision import. Ties break on id so the choice is deterministic.
+ */
+function existingTripPackage(
+  req: Pick<AgentAskRequest, 'context'>,
+): { id: string; revision: number } | undefined {
+  const imports = req.context.packageImports.map(asRecord).map((p) => ({
+    id: nonEmptyStr(p.id) || nonEmptyStr(p.packageId),
+    revision: typeof p.revision === 'number' ? p.revision : 0,
+  }))
+  const revisionOf = (id: string) =>
+    Math.max(0, ...imports.filter((p) => p.id === id).map((p) => p.revision))
+  const owners = new Map<string, number>()
+  for (const o of req.context.travelOptions.map(asRecord)) {
+    const id = nonEmptyStr(o.packageId)
+    if (id) owners.set(id, (owners.get(id) ?? 0) + 1)
+  }
+  const owner = [...owners].sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  )[0]?.[0]
+  if (owner) return { id: owner, revision: revisionOf(owner) }
+  const latest = imports
+    .filter((p) => p.id)
+    .sort((a, b) => b.revision - a.revision || a.id.localeCompare(b.id))[0]
+  return latest ? { id: latest.id, revision: latest.revision } : undefined
 }
 
 function extractJsonObject(text: string): unknown {
@@ -367,6 +454,8 @@ export function hydrateProposal(
     serverWarnings?: string[]
     intent?: string
     researchDiagnostics?: ResearchDiagnostics
+    /** Findings-only answer: no skeleton, schedule merge, or airport arrivals. */
+    researchOnly?: boolean
   },
 ): unknown {
   const obj = asRecord(stripNulls(raw))
@@ -399,22 +488,20 @@ export function hydrateProposal(
         'America/Mexico_City',
       )
     : str(trip.timezone, 'America/Mexico_City')
-  const packageImports = req.context.packageImports.map(asRecord)
-  const priorPkg = isNewTravel ? undefined : packageImports[0]
+  const existingPkg = isNewTravel ? undefined : existingTripPackage(req)
   const packageId = isNewTravel
     ? nonEmptyStr(asRecord(withoutClaims.package).packageId, `new-${tripId}`)
-    : nonEmptyStr(priorPkg?.id) ||
-      nonEmptyStr(priorPkg?.packageId) ||
-      `agent-${tripId}`
-  const priorRevision =
-    typeof priorPkg?.revision === 'number' ? priorPkg.revision : 0
+    : existingPkg?.id || `agent-${tripId}`
+  const priorRevision = existingPkg?.revision ?? 0
   const revision = isNewTravel
     ? 1
     : Math.max(1, priorRevision + 1)
 
   let pkg = asRecord(withoutClaims.package)
   const coherenceWarnings: string[] = []
-  if (isNewTravel) {
+  if (opts?.researchOnly) {
+    if (isNewTravel) coherenceWarnings.push(...webResearchWarnings(toolTrace))
+  } else if (isNewTravel) {
     // Defense in depth: strip inventable concrete facts before skeleton/airport
     // enrich (also runs in assertDraftGrounded for the normal parse path).
     const wrap: Record<string, unknown> = { package: pkg }
@@ -433,6 +520,11 @@ export function hydrateProposal(
     coherenceWarnings.push(
       ...collectNewTravelServerWarnings(pkg, req.prompt, toolTrace),
     )
+  }
+  if (isNewTravel) {
+    const tentative = markTentativeTripWindow(pkg, req.prompt)
+    pkg = tentative.pkg
+    coherenceWarnings.push(...tentative.warnings)
   }
   const collections = sanitizePackageCollections(pkg)
   const pkgTrip = asRecord(pkg.trip)
@@ -459,11 +551,14 @@ export function hydrateProposal(
     package: {
       ...pkg,
       schemaVersion: 1,
-      packageId: nonEmptyStr(pkg.packageId, packageId),
-      revision:
-        typeof pkg.revision === 'number' && pkg.revision >= 1
+      // Existing trip: package identity is server-owned (a model-chosen id
+      // re-keys every option and orphans the current ones).
+      packageId: isNewTravel ? nonEmptyStr(pkg.packageId, packageId) : packageId,
+      revision: isNewTravel
+        ? typeof pkg.revision === 'number' && pkg.revision >= 1
           ? pkg.revision
-          : revision,
+          : revision
+        : revision,
       generatedAt: nowIso(),
       trip: {
         id: tripId,
@@ -498,8 +593,21 @@ export function hydrateProposal(
 }
 
 export type ParseProposalResult =
-  | { ok: true; proposal: AgentProposal }
+  | {
+      ok: true
+      proposal: AgentProposal
+      assessedGoals?: ResearchGoal[]
+      researchOnly?: boolean
+      groundedSourceUrls?: string[]
+    }
   | { ok: false; error: string; code?: string; warnings?: string[] }
+
+/** Post-grounding response shaping (goal assessment → package | research_only). */
+type ResponseShaping = {
+  noMutation: boolean
+  assess: (grounding: GroundingSuccess) => ResearchGoal[]
+  planner?: () => { state: PlannerState; dimensions: ResearchDimension[] }
+}
 
 function tryParseProposal(
   text: string,
@@ -507,6 +615,7 @@ function tryParseProposal(
   toolTrace: ToolTraceEntry[],
   intent?: string,
   researchDiagnostics?: ResearchDiagnostics,
+  shaping?: ResponseShaping,
 ): ParseProposalResult {
   try {
     const raw = extractJsonObject(text)
@@ -535,10 +644,44 @@ function tryParseProposal(
       }
     }
 
-    let hydrated: unknown = hydrateProposal(grounding.draft, req, toolTrace, {
+    let draftForHydrate = grounding.draft
+    let assessedGoals: ResearchGoal[] | undefined
+    let researchOnly = false
+    if (shaping) {
+      assessedGoals = shaping.assess(grounding)
+      const shape = decideResponseShape({
+        noMutation: shaping.noMutation,
+        goals: assessedGoals,
+      })
+      const planner = shaping.planner?.()
+      if (shape.shape === 'research_only') {
+        researchOnly = true
+        draftForHydrate = toResearchOnlyDraft(grounding.draft, req, {
+          isNewTravel: intent === 'new_travel' || req.mode === 'new_travel',
+          goals: assessedGoals,
+          reasons: shape.reasons,
+          validClaims: grounding.validClaims,
+          planner,
+        })
+      } else if (planner) {
+        const modelWarnings = Array.isArray(grounding.draft.warnings)
+          ? grounding.draft.warnings.filter((w): w is string => typeof w === 'string')
+          : []
+        draftForHydrate = {
+          ...grounding.draft,
+          warnings: [
+            ...filterUnresearchedNegativeWarnings(modelWarnings, planner.state),
+            ...pendingGoalWarnings(assessedGoals),
+          ],
+        }
+      }
+    }
+
+    let hydrated: unknown = hydrateProposal(draftForHydrate, req, toolTrace, {
       serverWarnings: dtWarnings,
       intent,
       researchDiagnostics,
+      researchOnly,
     })
     let parsed = agentProposalSchema.safeParse(hydrated)
 
@@ -566,7 +709,14 @@ function tryParseProposal(
     if (!parsed.success) {
       return { ok: false, error: parsed.error.message }
     }
-    return { ok: true, proposal: parsed.data }
+    const groundedSourceUrls = [
+      ...new Set(
+        grounding.validClaims
+          .filter((c) => c.sourceType === 'web' && /^https:\/\//i.test(c.sourceUrl ?? ''))
+          .map((c) => c.sourceUrl!),
+      ),
+    ]
+    return { ok: true, proposal: parsed.data, assessedGoals, researchOnly, groundedSourceUrls }
   } catch (err) {
     return {
       ok: false,
@@ -631,9 +781,22 @@ export async function runAgentAsk(
   let hadRepair = false
   let toolRounds = 0
   let forcedExtraRounds = 0
-  const researchGoalsSeed: ResearchGoal[] =
-    req.mode === 'new_travel' ? deriveResearchGoals(req.prompt) : []
+  let contactFollowUpDone = false
+  const askedForContact = userAskedForContact(req.prompt)
+  let researchGoalsSeed: ResearchGoal[] = []
+  let plan: ResearchPlan | null = null
+  let multiObjective = false
+  const baseCap = deps.cfg.maxToolCalls
+  const multiCap = Math.max(baseCap, deps.cfg.maxToolCallsMultiObjective ?? 12)
+  const availableTools = registry.definitions().map((d) => d.function.name)
   const tripDates = extractTripDatesFromPrompt(req.prompt)
+  /**
+   * Tool-call ceiling. Multi-objective research is bounded per dimension by the
+   * planner (limits + closing unproductive lines); this is only the backstop.
+   */
+  const currentCap = (): number => (multiObjective && plan ? multiCap : baseCap)
+  const legacyCoverage = () =>
+    !multiObjective && researchGoalsSeed.length > 0
   const usage = emptyUsage()
 
   const failMeta = (): NonNullable<AgentRuntimeError['runMeta']> => ({
@@ -698,12 +861,24 @@ export async function runAgentAsk(
     }
 
     const intent = classifyAskIntent(req.prompt, req.mode)
+    const noMutation = detectNoMutationDirective(req.prompt)
+    if (intent !== 'context_answer') {
+      const derived = deriveResearchPlan(req.prompt)
+      // Simple asks keep current behavior: legacy goals for new_travel only.
+      if (intent === 'new_travel' || derived.multiObjective) {
+        plan = ungateEventForExistingTripMutation(derived, intent, req)
+        researchGoalsSeed = plan.goals
+        multiObjective = derived.multiObjective && derived.goals.length > 0
+      }
+    }
     logJobEvent('ask_intent', {
       jobId: deps.jobId ?? null,
       requestId: deps.requestId ?? null,
       tripId: deps.tripId ?? req.tripId,
       intent,
       mode: req.mode ?? 'ask',
+      noMutation,
+      multiObjective,
     })
 
     // --- Context-only fast path: no tools, no web claims ---
@@ -762,9 +937,21 @@ export async function runAgentAsk(
       if (intent === 'new_travel') {
         messages.push({
           role: 'user',
-          content: buildNewTravelUserNudge(req.tripId),
+          content: buildNewTravelUserNudge(req.tripId, { multiObjective }),
         })
       }
+      if (multiObjective && plan) {
+        messages.push({
+          role: 'user',
+          content: buildPlannerNudge({
+            plan,
+            state: computePlannerState(plan, toolTrace),
+            remainingCalls: multiCap,
+          }),
+        })
+      }
+      let lastOpenLevel =
+        multiObjective && plan ? computePlannerState(plan, toolTrace).minOpenLevel : 0
       // --- Tool loop (research / mutation / new_travel events) ---
       while (steps < deps.cfg.maxSteps) {
         if (controller.signal.aborted) {
@@ -772,9 +959,48 @@ export async function runAgentAsk(
         }
 
         const tools = registry.definitions()
+        // While the event is the only open priority, the planner owns the step:
+        // the call is restricted to its tool (the model still writes the args),
+        // so no step is spent on lodging/transport/flights the planner would defer.
+        let forced: { tool: string; trace: Record<string, unknown> } | null = null
+        if (multiObjective && plan && toolCallsUsed < currentCap()) {
+          const state = computePlannerState(plan, toolTrace)
+          const action = nextRequiredResearchAction(plan, state)
+          const tool = action?.type === 'VERIFY_EVENT' ? 'fetchUrl' : action ? 'webSearch' : null
+          if (!action && state.minOpenLevel > lastOpenLevel) {
+            messages.push({
+              role: 'user',
+              content: buildResearchTransitionNote(state, currentCap() - toolCallsUsed),
+            })
+          }
+          lastOpenLevel = state.minOpenLevel
+          if (action && tool && tools.some((t) => t.function.name === tool)) {
+            forced = {
+              tool,
+              trace: { type: action.type, candidate: action.candidate ?? null, reason: action.reason },
+            }
+            messages.push({ role: 'user', content: requiredActionMessage(action, state) })
+            logJobEvent('research_forced_action', {
+              jobId: deps.jobId ?? null,
+              requestId: deps.requestId ?? null,
+              tripId: deps.tripId ?? req.tripId,
+              step: steps + 1,
+              tool,
+              ...forced.trace,
+              ...(action.type === 'VERIFY_EVENT' ? { eligibleUrls: action.eligibleUrls.join(' ') } : {}),
+            })
+          }
+        }
         const result = await chatLogged('tool', {
           messages,
-          ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
+          ...(tools.length
+            ? {
+                tools,
+                tool_choice: forced
+                  ? { type: 'function' as const, function: { name: forced.tool } }
+                  : ('auto' as const),
+              }
+            : {}),
         })
 
         const assistant = result.message
@@ -782,19 +1008,27 @@ export async function runAgentAsk(
 
         if (assistant.tool_calls?.length) {
           toolRounds += 1
+          const stepTraceStart = toolTrace.length
           // Reserve tool budget for a directed follow-up round when important
           // research goals are still open (avoids burning maxToolCalls on the
           // first parallel webSearch batch).
           const reserveForCoverage =
             intent === 'new_travel' &&
-            researchGoalsSeed.length > 0 &&
+            legacyCoverage() &&
             forcedExtraRounds === 0
               ? Math.min(2, Math.max(0, deps.cfg.maxToolCalls - 2))
               : 0
           const softCap = deps.cfg.maxToolCalls - reserveForCoverage
           // Prefer searchFlightSchedules, then fetchUrl, before extra webSearch.
           const orderedCalls = [...assistant.tool_calls]
-          if (forcedExtraRounds > 0 || reserveForCoverage > 0) {
+          if (multiObjective && plan) {
+            // Dependency order: event/candidate evaluation → access → flights.
+            const p = plan
+            const levelOf = (c: (typeof orderedCalls)[number]) =>
+              plannedCallLevel(p, c.function.name, c.function.arguments, toolTrace)
+                .level
+            orderedCalls.sort((a, b) => levelOf(a) - levelOf(b))
+          } else if (forcedExtraRounds > 0 || reserveForCoverage > 0) {
             orderedCalls.sort((a, b) => {
               const rank = (name: string) =>
                 name === 'searchFlightSchedules'
@@ -814,10 +1048,48 @@ export async function runAgentAsk(
           for (const call of orderedCalls) {
             const isFetch = call.function.name === 'fetchUrl'
             const isSchedule = call.function.name === 'searchFlightSchedules'
+            if (multiObjective && plan) {
+              const decision = planToolCallDecision({
+                plan,
+                state: computePlannerState(plan, toolTrace),
+                toolName: call.function.name,
+                argsJson: call.function.arguments,
+                toolTrace,
+              })
+              if (!decision.allow) {
+                let requested: unknown = call.function.arguments
+                try {
+                  requested = JSON.parse(call.function.arguments)
+                } catch {
+                  // keep the raw string
+                }
+                const skipTrace: ToolTraceEntry = {
+                  tool: call.function.name,
+                  // Nested: consumers read top-level query/url only for executed calls.
+                  args: { skipped: true, deferred: decision.reason, requested },
+                  ok: false,
+                  sources: [],
+                  error: `deferred: ${decision.reason}`,
+                  checkedAt: nowIso(),
+                }
+                toolTrace.push(skipTrace)
+                messages.push({
+                  role: 'tool',
+                  tool_call_id: call.id,
+                  name: call.function.name,
+                  content: JSON.stringify({
+                    UNTRUSTED_CONTENT: true,
+                    error: skipTrace.error,
+                    hint: decision.hint,
+                  }),
+                })
+                continue
+              }
+            }
             // Defer lodging/event tools while critical flight attempt unfinished
             if (
               intent === 'new_travel' &&
-              researchGoalsSeed.length > 0 &&
+              legacyCoverage() &&
               shouldSkipToolCallForFlightPriority({
                 toolName: call.function.name,
                 argsJson: call.function.arguments,
@@ -851,7 +1123,8 @@ export async function runAgentAsk(
               })
               continue
             }
-            const atHardCap = toolCallsUsed >= deps.cfg.maxToolCalls
+            const cap = currentCap()
+            const atHardCap = toolCallsUsed >= cap
             // Reserved slots are for schedule search / fetchUrl (or post-nudge directed work).
             const blockedByReserve =
               reserveForCoverage > 0 &&
@@ -870,7 +1143,9 @@ export async function runAgentAsk(
                 sources: [],
                 error: reserved
                   ? `tool budget reserved for directed research follow-up (${reserveForCoverage} call(s) held; used ${toolCallsUsed}/${deps.cfg.maxToolCalls})`
-                  : `AGENT_MAX_TOOL_CALLS=${deps.cfg.maxToolCalls} exceeded`,
+                  : multiObjective
+                    ? `AGENT_MAX_TOOL_CALLS research budget ${cap} reached (multi-objective ceiling ${multiCap})`
+                    : `AGENT_MAX_TOOL_CALLS=${deps.cfg.maxToolCalls} exceeded`,
                 checkedAt,
               }
               toolTrace.push(skipTrace)
@@ -894,19 +1169,114 @@ export async function runAgentAsk(
               call.function.arguments,
               { signal: controller.signal },
             )
+            const content = renderToolContentForModel(
+              exec.trace,
+              toolTrace,
+              exec.contentForModel,
+            )
             toolTrace.push(exec.trace)
             messages.push({
               role: 'tool',
               tool_call_id: call.id,
               name: call.function.name,
-              content: exec.contentForModel,
+              content,
             })
+          }
+          if (forced) {
+            for (const t of toolTrace.slice(stepTraceStart)) {
+              t.args = { ...(t.args ?? {}), forcedResearchAction: forced.trace }
+            }
           }
           continue
         }
 
+        // No tool calls → contact data the user asked for may still sit behind a
+        // search hit: fetch it once and hand the passages back to the model.
+        if (!contactFollowUpDone && askedForContact && registry.has('fetchUrl')) {
+          contactFollowUpDone = true
+          const cap = currentCap()
+          const eligible = contactFollowUpUrls(toolTrace)
+          const urls = eligible.slice(0, Math.max(0, cap - toolCallsUsed))
+          logJobEvent('contact_follow_up', {
+            jobId: deps.jobId ?? null,
+            requestId: deps.requestId ?? null,
+            tripId: deps.tripId ?? req.tripId,
+            eligible: eligible.join(' '),
+            fetched: urls.join(' '),
+            toolCallsUsed,
+            cap,
+          })
+          if (urls.length) {
+            const calls: ToolCall[] = urls.map((url, i) => ({
+              id: `contact_follow_up_${i + 1}`,
+              type: 'function',
+              function: { name: 'fetchUrl', arguments: JSON.stringify({ url }) },
+            }))
+            messages.push({ role: 'assistant', content: null, tool_calls: calls })
+            for (const call of calls) {
+              toolCallsUsed += 1
+              const exec = await registry.execute(call.function.name, call.function.arguments, {
+                signal: controller.signal,
+              })
+              exec.trace.args = { ...(exec.trace.args ?? {}), contactFollowUp: true }
+              const content = renderToolContentForModel(exec.trace, toolTrace, exec.contentForModel)
+              toolTrace.push(exec.trace)
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                name: call.function.name,
+                content,
+              })
+            }
+            messages.push({ role: 'user', content: buildContactFollowUpNote(urls) })
+            continue
+          }
+        }
+
+        // No tool calls → multi-objective: nudge only while decision research is open
+        if (multiObjective && plan) {
+          const state = computePlannerState(plan, toolTrace)
+          const cap = currentCap()
+          if (
+            shouldForcePlannerRound({
+              plan,
+              state,
+              forcedRounds: forcedExtraRounds,
+              toolCallsUsed,
+              maxToolCalls: cap,
+              steps,
+              maxSteps: deps.cfg.maxSteps,
+            })
+          ) {
+            forcedExtraRounds += 1
+            logJobEvent('research_planner_nudge', {
+              jobId: deps.jobId ?? null,
+              requestId: deps.requestId ?? null,
+              tripId: deps.tripId ?? req.tripId,
+              forcedExtraRounds,
+              open: state.dimensions
+                .filter((d) => !d.satisfied && !d.exhausted)
+                .map((d) => d.dimension)
+                .join(','),
+              candidates: state.relevantCandidates.join(','),
+              toolCallsUsed,
+              cap,
+            })
+            messages.push({
+              role: 'user',
+              content: buildPlannerNudge({
+                plan,
+                state,
+                remainingCalls: Math.max(0, cap - toolCallsUsed),
+              }),
+            })
+            continue
+          }
+          break
+        }
+
         // No tool calls → maybe force another directed research round (new_travel)
-        if (intent === 'new_travel' && researchGoalsSeed.length > 0) {
+        if (intent === 'new_travel' && legacyCoverage()) {
           const assessed = assessResearchGoals(
             researchGoalsSeed,
             toolTrace,
@@ -966,20 +1336,84 @@ export async function runAgentAsk(
       throw new AgentRuntimeError('Agent timeout', 'llm_timeout', failMeta())
     }
 
+    const assessGoals = (grounded?: GroundingSuccess): ResearchGoal[] => {
+      if (researchGoalsSeed.length === 0) return []
+      const pkg = grounded ? asRecord(grounded.draft).package : undefined
+      if (multiObjective && plan) {
+        return assessPlannerGoals(plan, toolTrace, {
+          grounded: grounded
+            ? { validClaims: grounded.validClaims, package: pkg }
+            : undefined,
+          availableTools,
+          tripDates,
+        })
+      }
+      return assessResearchGoals(researchGoalsSeed, toolTrace, {
+        package: pkg,
+        tripDates,
+        availableTools,
+      })
+    }
+    const capUsed = currentCap()
+    const preGoals = assessGoals()
+    const openDecision = preGoals.filter(
+      (g) => g.decisionCritical && g.status !== 'RESOLVED',
+    )
+    const researchOnlyPrompted =
+      noMutation ||
+      openDecision.some(
+        (g) => g.status === 'UNRESOLVED' || g.status === 'UNSUPPORTED',
+      )
+
     const researchDiagnosticsPre =
-      intent === 'new_travel' && researchGoalsSeed.length > 0
+      researchGoalsSeed.length > 0
         ? buildResearchDiagnostics({
             goals: researchGoalsSeed,
+            assessedGoals: multiObjective ? preGoals : undefined,
+            availableTools,
             toolTrace,
             toolRounds,
             toolCallsUsed,
-            maxToolCalls: deps.cfg.maxToolCalls,
+            maxToolCalls: capUsed,
             forcedExtraRounds,
             tripDates,
           })
         : undefined
 
-    messages.push({ role: 'user', content: buildFinalProposalPrompt(intent) })
+    const shaping: ResponseShaping | undefined =
+      noMutation || multiObjective
+        ? {
+            noMutation,
+            assess: assessGoals,
+            planner:
+              multiObjective && plan
+                ? () => ({
+                    state: computePlannerState(plan!, toolTrace),
+                    dimensions: plan!.dimensions,
+                  })
+                : undefined,
+          }
+        : undefined
+
+    messages.push({
+      role: 'user',
+      content: researchOnlyPrompted
+        ? buildResearchOnlyFinalPrompt({
+            reasons: decideResponseShape({ noMutation, goals: preGoals })
+              .reasons,
+            openGoals: openDecision.map((g) => `${g.label}: ${g.status}`),
+          })
+        : buildFinalProposalPrompt(intent, {
+            decisionGateLabels: openDecision.map(
+              (g) => `${g.label} (${g.status})`,
+            ),
+            pendingGoalLabels: multiObjective
+              ? preGoals
+                  .filter((g) => g.important && !g.decisionCritical && g.status !== 'RESOLVED')
+                  .map((g) => `${g.label} (${g.status})`)
+              : [],
+          }),
+    })
     const finalResult = await chatLogged('final', {
       messages,
       response_format: agentProposalStructuredResponseFormat(),
@@ -1008,21 +1442,22 @@ export async function runAgentAsk(
 
     const finalizeDiagnostics = (
       proposal: AgentProposal,
+      assessedGoals?: ResearchGoal[],
+      groundedSourceUrls?: string[],
     ): AgentProposal => {
-      if (intent !== 'new_travel' || researchGoalsSeed.length === 0) {
-        return researchDiagnosticsPre
-          ? { ...proposal, researchDiagnostics: researchDiagnosticsPre }
-          : proposal
-      }
+      if (researchGoalsSeed.length === 0) return proposal
       const diag = buildResearchDiagnostics({
         goals: researchGoalsSeed,
+        assessedGoals: multiObjective ? (assessedGoals ?? preGoals) : undefined,
+        availableTools,
         toolTrace,
         toolRounds,
         toolCallsUsed,
-        maxToolCalls: deps.cfg.maxToolCalls,
+        maxToolCalls: capUsed,
         forcedExtraRounds,
         package: proposal.package,
         tripDates,
+        groundedSourceUrls,
       })
       return { ...proposal, researchDiagnostics: diag }
     }
@@ -1033,10 +1468,11 @@ export async function runAgentAsk(
       toolTrace,
       intent,
       researchDiagnosticsPre,
+      shaping,
     )
     if (first.ok) {
       return {
-        proposal: finalizeDiagnostics(first.proposal),
+        proposal: finalizeDiagnostics(first.proposal, first.assessedGoals, first.groundedSourceUrls),
         meta: {
           steps,
           llmCalls,
@@ -1080,10 +1516,11 @@ export async function runAgentAsk(
       toolTrace,
       intent,
       researchDiagnosticsPre,
+      shaping,
     )
     if (second.ok) {
       return {
-        proposal: finalizeDiagnostics(second.proposal),
+        proposal: finalizeDiagnostics(second.proposal, second.assessedGoals, second.groundedSourceUrls),
         meta: {
           steps,
           llmCalls,

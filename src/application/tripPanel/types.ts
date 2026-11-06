@@ -59,6 +59,14 @@ export type TripPanelCard = {
   /** Raw option type for component actions. */
   optionType?: string
   entityKind?: 'travelOption' | 'itineraryItem' | 'checklistItem' | 'note'
+  checkedAt?: string
+  nextAction?: string
+  priceHistory?: Array<{
+    amount: number
+    currency: string
+    checkedAt: string
+    sourceUrl?: string
+  }>
 }
 
 export type IntegrityLight = 'green' | 'amber' | 'red'
@@ -71,6 +79,8 @@ export type TripPanelDiagnostics = {
   sourceCount: number
   /** Distinct URLs seen in toolTrace (consulted, not necessarily anchored). */
   consultedSourceCount?: number
+  /** Distinct URLs backing grounded findings (claims), anchored to an entity or not. */
+  groundedFindingSourceCount?: number
   warnings: string[]
   /** True when Create should ask for draft confirmation. */
   needsCreateConfirm: boolean
@@ -89,6 +99,14 @@ export type TripPanelHeader = {
   budgetAmount?: number
   budgetCurrency?: string
   budgetConfidence?: string
+  /** Sum of the chosen option. Alternatives and unpriced rows are excluded. */
+  chosenSubtotal?: number
+  amountPaid?: number
+  /** Chosen subtotal still unpaid. */
+  amountDue?: number
+  /** Pending flights, stays and transfers that have no price yet. */
+  unquotedCount?: number
+  ledgerCurrency?: string
   progressPct: number
 }
 
@@ -116,7 +134,7 @@ export type TripPanelModel = {
 
 export const VISUAL_STATUS_LABEL: Record<VisualStatus, string> = {
   confirmed: 'Confirmado',
-  verified: 'Verificado',
+  verified: 'Con fuente',
   estimated: 'Estimado',
   user_supplied: 'Dato del viajero',
   pending: 'Pendiente',

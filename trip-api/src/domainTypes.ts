@@ -1,3 +1,5 @@
+import type { BudgetRole, PriceObservation } from '../../shared/quoteLedger.ts'
+
 /**
  * Domain model — Viajes
  *
@@ -60,10 +62,16 @@ export interface TravelGoal {
   label: string
 }
 
+export interface TripBudget {
+  cap: number
+  currency: string
+}
+
 export interface Trip {
   id: string
   title: string
   destination?: string
+  budget?: TripBudget
   /** Inclusive trip range as calendar dates (YYYY-MM-DD), interpreted in Trip.timezone. */
   startDate: string
   endDate: string
@@ -267,6 +275,19 @@ export interface TravelOption {
   sourceUrl?: string
   /** When the web source was last checked (ISO with offset preferred). */
   checkedAt?: string
+  /** Earlier quotes for this same option, oldest first. Not part of the subtotal. */
+  priceHistory?: PriceObservation[]
+  /** primary counts toward the chosen subtotal; alternative and pending do not. */
+  budgetRole?: BudgetRole
+  /**
+   * Set false when the price is the same ticket already counted on another row
+   * (return leg). The amount still displays.
+   */
+  countsInBudget?: boolean
+  /** Amount already paid toward this option. Unset means nothing paid. */
+  amountPaid?: number
+  /** What to do next. Not a booking. */
+  nextAction?: string
   verificationStatus?: VerificationStatus
   sourceType: TravelOptionSourceType
   notes?: string

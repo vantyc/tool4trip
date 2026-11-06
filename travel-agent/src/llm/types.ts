@@ -40,7 +40,8 @@ export type JsonSchemaResponseFormat = {
 export type ChatCompletionParams = {
   messages: ChatMessage[]
   tools?: ToolDefinition[]
-  tool_choice?: 'auto' | 'none'
+  /** A named function forces that tool; the model still writes its arguments. */
+  tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } }
   response_format?: { type: 'json_object' } | JsonSchemaResponseFormat
   temperature?: number
   /** Optional completion size cap (provider default if unset by caller). */

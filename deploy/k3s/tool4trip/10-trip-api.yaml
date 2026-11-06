@@ -32,6 +32,24 @@ spec:
                 secretKeyRef:
                   name: trip-api-db
                   key: DATABASE_URL
+            - name: TRIP_OWNER_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tool4trip-session-auth
+                  key: AUTH_USERNAME
+                  optional: true
+            - name: TRIP_GUEST_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tool4trip-session-auth
+                  key: AUTH_GUEST_USERNAME
+                  optional: true
+            - name: TRIP_GUEST_TRIPS
+              valueFrom:
+                secretKeyRef:
+                  name: tool4trip-session-auth
+                  key: AUTH_GUEST_TRIPS
+                  optional: true
           readinessProbe:
             httpGet:
               path: /healthz

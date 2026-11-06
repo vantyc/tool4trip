@@ -1,8 +1,16 @@
 import type { Booking, TravelOption, TravelOptionType } from '../../domain/types'
 import { newId } from '../ids'
-import type { BoardItem, BoardLeg, BoardStop } from './buildTripBoard'
+import type { BoardItem, BoardLeg, BoardStop, NightSplit, TripBoard } from './buildTripBoard'
 import { placeKey, resolvePlace } from './places'
-import { minutesBetween, offsetForZone } from './time'
+import {
+  addDays,
+  daysBetween,
+  isoOffset,
+  localClock,
+  localDate,
+  minutesBetween,
+  offsetForZone,
+} from './time'
 
 export type OptionPatch = Partial<
   Pick<
@@ -23,6 +31,7 @@ export type OptionPatch = Partial<
     | 'notes'
     | 'status'
     | 'budgetRole'
+    | 'stayWindow'
   >
 >
 
@@ -82,6 +91,97 @@ export function swapAlternativePlan(leg: BoardLeg, altId: string): PlannedChange
   ]
 }
 
+/** Lodging rows that make up a stay's dates (chosen, pending and set-aside hotels). */
+function stayRows(stop: BoardStop): TravelOption[] {
+  const inDay = localDate(stop.checkIn)
+  return [...stop.lodging, ...stop.lodgingAlternatives]
+    .filter((l) => l.option && l.status !== 'booked')
+    .filter((l) => (l.window ? stop.window !== undefined : !inDay || localDate(l.startAt) === inDay))
+    .map((l) => l.option!)
+}
+
+/** True when a booked hotel fixes this stay's dates; edit those with the hotel. */
+export function stayHasBooking(stop: BoardStop): boolean {
+  return stop.lodging.some((l) => l.status === 'booked')
+}
+
+/** Same wall clock and offset as `previous` on a new date; defaults for new stamps. */
+function moveStamp(
+  previous: string | undefined,
+  date: string,
+  defaultClock: string,
+  place?: string,
+  fallbackOffset?: string,
+): string {
+  const clock = localClock(previous) ?? defaultClock
+  const offset = isoOffset(previous)
+  return offset ? `${date}T${clock}:00${offset}` : stamp(date, clock, place, fallbackOffset)
+}
+
+function retitle(o: TravelOption, from: string, to: string): Partial<TravelOption> {
+  const m = o.title.match(PLACEHOLDER_TITLE)
+  return m ? { title: placeholderTitle(m[1]!, from, to) } : {}
+}
+
+/** New check-in / check-out dates for every hotel row of a stay. Clocks stay as they were. */
+export function stayDatesPlan(
+  stop: BoardStop,
+  checkIn: string,
+  checkOut: string,
+  fallbackOffset?: string,
+): PlannedChange[] {
+  if (!(daysBetween(checkIn, checkOut)! > 0)) return []
+  return stayRows(stop).map((o) => ({
+    option: o,
+    patch: {
+      startAt: moveStamp(o.startAt, checkIn, '15:00', o.destination ?? stop.label, fallbackOffset),
+      endAt: moveStamp(o.endAt, checkOut, '11:00', o.destination ?? stop.label, fallbackOffset),
+      stayWindow: undefined,
+      ...retitle(o, checkIn, checkOut),
+    },
+  }))
+}
+
+/**
+ * Moves the boundary between two consecutive stays: the first keeps
+ * `firstNights`, the second gets the rest up to the end of the shared span.
+ */
+export function splitNightsPlan(
+  board: TripBoard,
+  split: NightSplit,
+  firstNights: number,
+): PlannedChange[] {
+  if (firstNights < 1 || firstNights >= split.total) return []
+  const a = board.stops.find((s) => s.id === split.firstStopId)
+  const b = board.stops.find((s) => s.id === split.secondStopId)
+  if (!a || !b || stayHasBooking(a) || stayHasBooking(b)) return []
+  const boundary = addDays(split.from, firstNights)
+  const firstOffset = isoOffset(a.checkIn)
+  const changes: PlannedChange[] = []
+  for (const o of stayRows(a)) {
+    changes.push({
+      option: o,
+      patch: {
+        endAt: moveStamp(o.endAt, boundary, '11:00', o.destination ?? a.label, firstOffset),
+        ...retitle(o, localDate(o.startAt) ?? split.from, boundary),
+      },
+    })
+  }
+  for (const o of stayRows(b)) {
+    const place = o.destination ?? b.label
+    changes.push({
+      option: o,
+      patch: {
+        startAt: moveStamp(o.startAt, boundary, '15:00', place, firstOffset),
+        endAt: moveStamp(o.endAt, localDate(o.endAt) ?? split.to, '11:00', place, firstOffset),
+        stayWindow: undefined,
+        ...retitle(o, boundary, localDate(o.endAt) ?? split.to),
+      },
+    })
+  }
+  return changes
+}
+
 function stamp(date: string, clock: string, place?: string, fallbackOffset?: string): string {
   const tz = resolvePlace(place)?.tz
   const offset = (tz ? offsetForZone(tz, `${date}T${clock}`) : undefined) ?? fallbackOffset
@@ -90,37 +190,56 @@ function stamp(date: string, clock: string, place?: string, fallbackOffset?: str
 
 const NOW = () => new Date().toISOString()
 
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+
+/** "17 al 23 nov 2026" (or "28 nov al 2 dic 2026"). */
+function rangeText(from: string, to: string): string {
+  const [y1, m1, d1] = from.split('-').map(Number) as [number, number, number]
+  const [y2, m2, d2] = to.split('-').map(Number) as [number, number, number]
+  const mon = (m: number) => MONTHS[m - 1]
+  if (y1 === y2 && m1 === m2) return `${d1} al ${d2} ${mon(m2)} ${y2}`
+  if (y1 === y2) return `${d1} ${mon(m1)} al ${d2} ${mon(m2)} ${y2}`
+  return `${d1} ${mon(m1)} ${y1} al ${d2} ${mon(m2)} ${y2}`
+}
+
+const PLACEHOLDER_TITLE = /^Pendiente — hotel en (.+?), /
+
+function placeholderTitle(place: string, from?: string, to?: string): string {
+  return `Pendiente — hotel en ${place}, ${from && to ? rangeText(from, to) : 'fechas por definir'}`
+}
+
 export function newStayOption(
   tripId: string,
   input: {
     place: string
-    checkIn: string
-    checkOut: string
     hotel?: string
     price?: number
     currency?: string
     address?: string
     /** Offset to use when the place zone is unknown (a neighbouring stop's). */
     fallbackOffset?: string
-  },
+  } & (
+    | { checkIn: string; checkOut: string; window?: undefined }
+    | { checkIn?: undefined; checkOut?: undefined; window: { from: string; to: string } }
+  ),
 ): TravelOption {
   const place = input.place.trim()
   const hotel = input.hotel?.trim()
   const now = NOW()
+  const dated = input.checkIn !== undefined
   return {
     id: newId(),
     tripId,
     type: 'lodging',
     status: 'researched',
     budgetRole: 'pending',
-    title: hotel
-      ? `${hotel} — ${place}`
-      : `Pendiente — hotel en ${place}, ${input.checkIn} al ${input.checkOut}`,
+    title: hotel ? `${hotel} — ${place}` : placeholderTitle(place, input.checkIn, input.checkOut),
     provider: hotel || undefined,
     destination: place,
     address: input.address?.trim() || undefined,
-    startAt: stamp(input.checkIn, '15:00', place, input.fallbackOffset),
-    endAt: stamp(input.checkOut, '11:00', place, input.fallbackOffset),
+    startAt: dated ? stamp(input.checkIn!, '15:00', place, input.fallbackOffset) : undefined,
+    endAt: dated ? stamp(input.checkOut!, '11:00', place, input.fallbackOffset) : undefined,
+    stayWindow: dated ? undefined : input.window,
     priceObserved: input.price,
     currency: input.price !== undefined ? (input.currency ?? 'MXN') : undefined,
     sourceType: 'manual',

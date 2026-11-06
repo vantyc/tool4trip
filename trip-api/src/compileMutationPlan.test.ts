@@ -763,7 +763,7 @@ describe('window-aware matching + preservation + id normalize', () => {
     )
   })
 
-  it('2: two current outbound IN_WINDOW → review_required', () => {
+  it('2: two current outbound IN_WINDOW, proposal updates one by id → other alternative kept, no conflict', () => {
     const current = liveCurrent().filter(
       (o) => o.externalId !== 'outbound-flight-1',
     )
@@ -784,8 +784,22 @@ describe('window-aware matching + preservation + id normalize', () => {
       proposedPackage: liveDegradedProposal(),
       llmOps: [],
     })
-    assert.equal(compiled.status, 'review_required')
-    assert.ok(compiled.conflicts.some((c) => /IN_WINDOW/i.test(c)))
+    assert.equal(compiled.status, 'ok', compiled.conflicts.join('; '))
+    assert.ok(
+      compiled.ops.some(
+        (o) => o.op === 'update' && o.externalId === 'outbound-flight-25sep',
+      ),
+    )
+    assert.ok(
+      !compiled.ops.some((o) =>
+        [o.externalId, o.supersedesExternalId].includes('outbound-flight-25sep-b'),
+      ),
+    )
+    assert.ok(
+      compiled.package.travelOptions.some(
+        (o) => o.externalId === 'outbound-flight-25sep-b',
+      ),
+    )
   })
 
   it('3: OUT_OF_WINDOW returns + IN_WINDOW return → inequívoco', () => {

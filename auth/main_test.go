@@ -137,3 +137,69 @@ func TestApiPathNoHtmlRedirect(t *testing.T) {
 		t.Fatal("API paths should not HTML-redirect")
 	}
 }
+
+func guestConfig(t *testing.T) *config {
+	t.Helper()
+	c := testConfig(t)
+	hash, err := bcrypt.GenerateFromPassword([]byte("invitada"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.guestUsername = "nane"
+	c.guestPasswordHash = hash
+	return c
+}
+
+func verifyAs(c *config, user, method, uri string) *httptest.ResponseRecorder {
+	tok, _ := c.mintSession(user, time.Now().UTC().Add(time.Hour))
+	req := httptest.NewRequest(http.MethodGet, "/_auth/verify", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: tok})
+	req.Header.Set("X-Forwarded-Method", method)
+	req.Header.Set("X-Forwarded-Uri", uri)
+	rec := httptest.NewRecorder()
+	c.handleVerify(rec, req)
+	return rec
+}
+
+func TestGuestLogin(t *testing.T) {
+	c := guestConfig(t)
+	if !c.authenticate("nane", "invitada") {
+		t.Fatal("guest should log in")
+	}
+	if c.authenticate("nane", "s3cret") || c.authenticate("travel", "invitada") {
+		t.Fatal("passwords must not cross accounts")
+	}
+	if !c.authenticate("travel", "s3cret") {
+		t.Fatal("owner must still log in")
+	}
+}
+
+func TestGuestReadsOnly(t *testing.T) {
+	c := guestConfig(t)
+	rec := verifyAs(c, "nane", "GET", "/api/trips/filipinas-nov-2026")
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Viajes-User") != "nane" {
+		t.Fatalf("guest read: status=%d user=%q", rec.Code, rec.Header().Get("X-Viajes-User"))
+	}
+	for _, m := range []string{"PUT", "POST", "PATCH", "DELETE"} {
+		if rec := verifyAs(c, "nane", m, "/api/trips/filipinas-nov-2026"); rec.Code != http.StatusForbidden {
+			t.Fatalf("guest %s: status=%d", m, rec.Code)
+		}
+	}
+	for _, uri := range []string{"/api/agent", "/api/agent/ask", "/API/Agent/jobs?x=1"} {
+		if rec := verifyAs(c, "nane", "GET", uri); rec.Code != http.StatusForbidden {
+			t.Fatalf("guest agent %s: status=%d", uri, rec.Code)
+		}
+	}
+	if rec := verifyAs(c, "travel", "PUT", "/api/trips/filipinas-nov-2026"); rec.Code != http.StatusOK {
+		t.Fatalf("owner write: status=%d", rec.Code)
+	}
+}
+
+func TestGuestSessionDiesWhenGuestRemoved(t *testing.T) {
+	c := guestConfig(t)
+	tok, _ := c.mintSession("nane", time.Now().UTC().Add(time.Hour))
+	c.guestUsername = ""
+	if _, ok := c.parseSession(tok); ok {
+		t.Fatal("guest session must stop working once the guest is removed")
+	}
+}

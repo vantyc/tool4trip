@@ -11,6 +11,7 @@ import {
 import { resolvePlace } from '../../application/tripBoard/places'
 import {
   daysBetween,
+  formatDayEs,
   instantMs,
   isoOffset,
   isoToWall,
@@ -365,11 +366,15 @@ export function BookForm({
   )
 }
 
+/** Where an undated stay goes: after `title`, somewhere between from and to. */
+export type StaySlotChoice = { id: string; title: string; from: string; to: string }
+
 export function AddStayForm({
   tripId,
   initial,
   fallbackOffset,
   places,
+  after = [],
   onDone,
   onCancel,
 }: {
@@ -377,9 +382,13 @@ export function AddStayForm({
   initial?: { place?: string; checkIn?: string; checkOut?: string }
   fallbackOffset?: (date: string) => string | undefined
   places: string[]
+  /** Stays an undated stay can follow. Empty hides the "no dates yet" choice. */
+  after?: StaySlotChoice[]
   onDone: () => void
   onCancel: () => void
 }) {
+  const [undated, setUndated] = useState(false)
+  const [afterId, setAfterId] = useState('')
   const [place, setPlace] = useState(initial?.place ?? '')
   const [checkIn, setCheckIn] = useState(initial?.checkIn ?? '')
   const [checkOut, setCheckOut] = useState(initial?.checkOut ?? '')
@@ -394,25 +403,32 @@ export function AddStayForm({
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (!place.trim()) return setError('Escribe el lugar.')
-    if (!checkIn || !checkOut || (nights ?? 0) <= 0) {
+    const slot = after.find((a) => a.id === afterId)
+    if (undated && !slot) return setError('Elige después de qué estancia va.')
+    if (!undated && (!checkIn || !checkOut || (nights ?? 0) <= 0)) {
       return setError('La salida debe ser al menos un día después de la llegada.')
     }
     const amount = parseAmount(price)
     if (amount === null) return setError('Precio inválido.')
     setBusy(true)
     setError(null)
+    const common = {
+      place,
+      hotel,
+      address,
+      price: amount,
+      currency: currency.trim().toUpperCase() || 'MXN',
+    }
     try {
       await services.travelOptions.save(
-        newStayOption(tripId, {
-          place,
-          checkIn,
-          checkOut,
-          hotel,
-          address,
-          price: amount,
-          currency: currency.trim().toUpperCase() || 'MXN',
-          fallbackOffset: resolvePlace(place) ? undefined : fallbackOffset?.(checkIn),
-        }),
+        undated
+          ? newStayOption(tripId, { ...common, window: { from: slot!.from, to: slot!.to } })
+          : newStayOption(tripId, {
+              ...common,
+              checkIn,
+              checkOut,
+              fallbackOffset: resolvePlace(place) ? undefined : fallbackOffset?.(checkIn),
+            }),
       )
       onDone()
     } catch (err) {
@@ -437,20 +453,47 @@ export function AddStayForm({
           ))}
         </datalist>
       </label>
-      <div className="tb-form-row">
-        <label>
-          Llegada (check-in)
-          <input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} required />
+      {after.length > 0 && (
+        <label className="tb-check">
+          <input type="checkbox" checked={undated} onChange={(e) => setUndated(e.target.checked)} />
+          Todavía no sé las fechas
         </label>
-        <label>
-          Salida (check-out)
-          <input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} required />
-        </label>
-      </div>
-      {nights !== undefined && nights > 0 && (
-        <p className="tb-form-note">
-          {nights} {nights === 1 ? 'noche' : 'noches'}
-        </p>
+      )}
+      {undated ? (
+        <>
+          <label>
+            Va después de
+            <select value={afterId} onChange={(e) => setAfterId(e.target.value)} required>
+              <option value="">Elegir estancia…</option>
+              {after.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.title} · entre {formatDayEs(a.from, false)} y {formatDayEs(a.to, false)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="tb-form-note">
+            Queda como estancia con fechas por definir. Después repartes las noches con la estancia anterior.
+          </p>
+        </>
+      ) : (
+        <>
+          <div className="tb-form-row">
+            <label>
+              Llegada (check-in)
+              <input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} required />
+            </label>
+            <label>
+              Salida (check-out)
+              <input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} required />
+            </label>
+          </div>
+          {nights !== undefined && nights > 0 && (
+            <p className="tb-form-note">
+              {nights} {nights === 1 ? 'noche' : 'noches'}
+            </p>
+          )}
+        </>
       )}
       <label>
         Hotel <small>(opcional)</small>

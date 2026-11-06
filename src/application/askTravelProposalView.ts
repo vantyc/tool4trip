@@ -2,6 +2,7 @@
  * Ask Travel proposal view helpers — derive UI from canonical preview,
  * never from LLM narrative alone.
  */
+import { isLodgingCandidateNote } from '../../shared/lodgingCandidate'
 
 export type CanonicalDiffField = {
   field: string
@@ -38,6 +39,10 @@ export type TravelOptionLike = {
   provider?: string
   checkedAt?: string
   notes?: string
+  phone?: string
+  address?: string
+  status?: string
+  verificationStatus?: string
 }
 
 export type TripWindow = {
@@ -291,6 +296,42 @@ export function flightScheduleConfidenceLabels(o: TravelOptionLike): string[] {
     'disponibilidad UNKNOWN',
     'equipaje UNKNOWN',
   ]
+}
+
+const STATUS_ES: Record<string, string> = {
+  researched: 'investigado',
+  shortlisted: 'preseleccionado',
+  selected: 'seleccionado',
+  booked: 'reservado',
+  rejected: 'descartado',
+}
+
+const VERIFICATION_ES: Record<string, string> = {
+  verified: 'verificado',
+  estimated: 'estimado',
+  unverified: 'sin verificar',
+}
+
+/** Contact and provenance lines shown directly under an option in the preview. */
+export function optionDetailLines(o: TravelOptionLike): string[] {
+  const lines: string[] = []
+  if (isLodgingCandidateNote(o.notes)) {
+    lines.push('Candidato de hospedaje — no reemplaza tu hospedaje actual')
+  }
+  const phone = o.phone?.trim()
+  if (phone) lines.push(`Tel: ${phone}`)
+  const address = o.address?.trim()
+  if (address) lines.push(`Dirección: ${address}`)
+  const url = o.sourceUrl?.trim()
+  if (url) lines.push(`Fuente: ${url}`)
+  const state = [
+    o.status ? (STATUS_ES[o.status] ?? o.status) : '',
+    o.verificationStatus
+      ? (VERIFICATION_ES[o.verificationStatus] ?? o.verificationStatus)
+      : '',
+  ].filter(Boolean)
+  if (state.length) lines.push(`Estado: ${state.join(' · ')}`)
+  return lines
 }
 
 export type EvidenceRow = {

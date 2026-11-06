@@ -4,6 +4,7 @@ import type { Booking, TravelOption } from '../../domain/types'
 import { filipinasNov2026Bundle } from '../../seed/filipinasNov2026'
 import { buildTripBoard } from './buildTripBoard'
 import {
+  applyPlan,
   canSwapAlternative,
   chooseLodgingPlan,
   chooseRoutePlan,
@@ -11,6 +12,8 @@ import {
   newLegOption,
   newStayOption,
   saveOptionEdit,
+  splitNightsPlan,
+  stayDatesPlan,
   swapAlternativePlan,
 } from './boardEdits'
 
@@ -155,7 +158,7 @@ describe('boardEdits', () => {
     assert.equal(o.budgetRole, 'pending')
     assert.equal(o.startAt, '2026-11-24T15:00:00+08:00')
     assert.equal(o.endAt, '2026-11-27T11:00:00+08:00')
-    assert.equal(o.title, 'Pendiente — hotel en Cebú, 2026-11-24 al 2026-11-27')
+    assert.equal(o.title, 'Pendiente — hotel en Cebú, 24 al 27 nov 2026')
   })
 
   it('nueva opción para un tramo queda pendiente', () => {
@@ -204,5 +207,73 @@ describe('boardEdits', () => {
     assert.equal(after.stops[0]!.status, 'booked')
     assert.equal(item.price, 20000)
     assert.equal(item.paid, 5000)
+  })
+
+  it('Cebú sin fechas: 6 noches en El Nido y 4 en Cebú', async () => {
+    const b = filipinasNov2026Bundle()
+    const ceb = newStayOption(b.trip.id, {
+      place: 'Cebú',
+      window: { from: '2026-11-17', to: '2026-11-27' },
+    })
+    assert.equal(ceb.title, 'Pendiente — hotel en Cebú, fechas por definir')
+    assert.equal(ceb.startAt, undefined)
+    const seed = [...b.travelOptions, ceb]
+    const before = buildTripBoard({ trip: b.trip, options: seed })
+    const split = before.splits.find((s) => s.firstNights === undefined)!
+    const plan = splitNightsPlan(before, split, 6)
+    assert.deepEqual(
+      plan.map((c) => [c.option.id, c.patch.startAt, c.patch.endAt]),
+      [
+        ['filipinas-nov-2026-p-hotel-eni', undefined, '2026-11-23T11:00:00+08:00'],
+        [ceb.id, '2026-11-23T15:00:00+08:00', '2026-11-27T11:00:00+08:00'],
+      ],
+    )
+    assert.ok('stayWindow' in plan[1]!.patch && plan[1]!.patch.stayWindow === undefined)
+
+    const svc = memoryServices(seed)
+    await applyPlan(svc.travelOptions, plan)
+    const saved = [...svc.options.values()].map((o) => JSON.parse(JSON.stringify(o)) as TravelOption)
+    const savedCeb = saved.find((o) => o.id === ceb.id)!
+    assert.equal(savedCeb.stayWindow, undefined)
+    assert.equal(savedCeb.title, 'Pendiente — hotel en Cebú, 23 al 27 nov 2026')
+
+    const after = buildTripBoard({ trip: b.trip, options: saved })
+    assert.deepEqual(
+      after.stops.filter((s) => s.kind === 'stay').map((s) => [s.label, s.nights]),
+      [
+        ['Manila', 2],
+        ['El Nido', 6],
+        ['Cebú', 4],
+        ['Manila', 1],
+      ],
+    )
+    assert.equal(after.legs.find((l) => l.toLabel === 'Cebú')!.dateHint, '2026-11-23')
+    assert.equal(after.tasks.some((t) => t.group === 'dates'), false)
+    const again = after.splits.find((s) => s.secondStopId === after.stops[4]!.id)!
+    assert.equal(again.firstNights, 6)
+    assert.deepEqual(
+      splitNightsPlan(after, again, 7).map((c) => [c.patch.startAt, c.patch.endAt]),
+      [
+        [undefined, '2026-11-24T11:00:00+08:00'],
+        ['2026-11-24T15:00:00+08:00', '2026-11-27T11:00:00+08:00'],
+      ],
+    )
+  })
+
+  it('cambiar fechas de una estancia mueve todos sus hoteles y conserva la hora', () => {
+    const stop = board().stops[2]!
+    const plan = stayDatesPlan(stop, '2026-11-15', '2026-11-18')
+    assert.deepEqual(
+      plan.map((c) => [c.option.id, c.patch.startAt, c.patch.endAt, c.patch.title]),
+      [
+        [
+          'filipinas-nov-2026-p-hotel-mnl-15',
+          '2026-11-15T15:00:00+08:00',
+          '2026-11-18T11:00:00+08:00',
+          'Pendiente — hotel en Manila, 15 al 18 nov 2026',
+        ],
+      ],
+    )
+    assert.deepEqual(stayDatesPlan(stop, '2026-11-18', '2026-11-18'), [])
   })
 })

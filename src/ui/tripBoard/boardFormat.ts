@@ -2,6 +2,7 @@ import type {
   BoardStatus,
   BoardStop,
   LegMode,
+  TaskGroup,
 } from '../../application/tripBoard/buildTripBoard'
 
 /** Material icon paths (Apache 2.0). The plane points north. */
@@ -54,6 +55,54 @@ export const STATUS_LABEL: Record<BoardStatus, string> = {
   booked: 'Reservado',
   quoted: 'Cotizado, sin reservar',
   pending: 'Pendiente',
+}
+
+/** For a single option: price state and booking state read separately. */
+export const ITEM_STATUS_LABEL: Record<BoardStatus, string> = {
+  booked: 'Reservado',
+  quoted: 'Cotizado · sin reservar',
+  pending: 'Sin cotizar',
+}
+
+export type PayState = 'paid' | 'partial' | 'unpaid'
+
+export function payState(item: { price?: number; paid?: number }): PayState {
+  const paid = item.paid ?? 0
+  if (paid <= 0) return 'unpaid'
+  return item.price !== undefined && paid < item.price ? 'partial' : 'paid'
+}
+
+export const PAY_LABEL: Record<PayState, string> = {
+  paid: 'Pagado',
+  partial: 'Pago parcial',
+  unpaid: 'Sin pagar',
+}
+
+export const TASK_GROUP_TITLE: Record<TaskGroup, string> = {
+  dates: 'Definir fechas',
+  quote: 'Cotizar vuelos internos',
+  choose: 'Elegir traslados',
+  hotels: 'Elegir hoteles',
+  book: 'Reservar',
+}
+
+export function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return undefined
+  }
+}
+
+/** Notes text without raw URLs, plus the URLs to show as buttons. */
+export function splitLinks(text: string): { text: string; urls: string[] } {
+  const urls: string[] = []
+  const clean = text.replace(/https?:\/\/[^\s)]+/g, (u) => {
+    const url = u.replace(/[.,;:]+$/, '')
+    if (!urls.includes(url)) urls.push(url)
+    return '(enlace abajo)'
+  })
+  return { text: clean, urls }
 }
 
 export function kindLabel(stop: BoardStop): string {

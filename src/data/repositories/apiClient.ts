@@ -1,5 +1,7 @@
 /** Thin fetch helpers for trip-api (ForwardAuth cookie, same-origin). */
 
+import { isReadOnly, markReadOnly } from '../access'
+
 export class ApiError extends Error {
   readonly status: number
   readonly body: unknown
@@ -54,15 +56,23 @@ export async function apiFetch<T = unknown>(
     credentials: 'same-origin',
   })
 
+  if (res.headers.get('X-Tool4trip-Access') === 'read-only') markReadOnly()
+
   if (res.status === 204) return undefined as T
 
   const body = await parseBody(res)
 
   if (res.status === 401) {
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.assign('/login')
+    }
     throw new ApiError(401, 'Sesión requerida — vuelve a iniciar sesión.', body)
   }
   if (res.status === 409) {
     throw new ApiError(409, 'Conflicto: el viaje fue modificado en otro dispositivo.', body)
+  }
+  if (res.status === 403 && isReadOnly()) {
+    throw new ApiError(403, 'Acceso de solo lectura: no puedes cambiar este viaje.', body)
   }
   if (!res.ok) {
     const msg =

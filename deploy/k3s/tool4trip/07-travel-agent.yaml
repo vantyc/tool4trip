@@ -43,8 +43,10 @@ spec:
               value: "8192"
             - name: AGENT_MAX_TOOL_CALLS
               value: "6"
+            - name: AGENT_MAX_TOOL_CALLS_MULTI_OBJECTIVE
+              value: "12"
             - name: AGENT_MAX_STEPS
-              value: "8"
+              value: "10"
             - name: LLM_TIMEOUT_MS
               value: "180000"
             - name: AGENT_JOB_MAX_CONCURRENCY

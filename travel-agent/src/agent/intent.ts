@@ -16,6 +16,81 @@ function norm(s: string): string {
     .trim()
 }
 
+/** "primero investiga…" only counts when no later build step is requested. */
+const RESEARCH_FIRST_RE =
+  /\b(?:primero|antes|solo|solamente|unicamente) (?:investiga|investigar|busca|buscar|compara|comparar|averigua|averiguar|verifica|verificar|revisa|revisar|analiza|analizar)\b/
+const THEN_BUILD_RE =
+  /\b(?:luego|despues|y entonces|y (?:luego )?(?:arma|crea|genera|prepara|agrega|actualiza))\b/
+
+const NO_MUTATION_PATTERNS: RegExp[] = [
+  /\bno (?:lo |la |los |las |me |nada )?(?:modifiques|cambies|actualices|toques|crees|apliques|guardes|agregues|anadas|elimines|borres|reserves|compres|edites|armes|generes)\b/,
+  /\bno (?:hay que |debes )?(?:crear|aplicar|modificar|cambiar(?! de)|guardar|actualizar|tocar|reservar|comprar|armar)\b/,
+  /\bno quiero que (?:\w+ )?(?:modifiques|cambies|actualices|toques|crees|apliques|guardes|reserves)\b/,
+  /\bsin (?:modificar|cambiar|crear|aplicar|guardar|tocar|actualizar|reservar)\b/,
+  /\bantes de (?:crear|aplicar|modificar|cambiar|guardar|armar|reservar)\b/,
+  /\b(?:todavia|aun|por ahora|de momento) no (?:\w+ )?(?:crees|crear|apliques|aplicar|modifiques|modificar|cambies|cambiar|guardes|guardar|armes|armar)\b/,
+  /\b(?:don'?t|do not) (?:modify|change|create|apply|save|update|book)\b/,
+  /\b(?:research|investigate) (?:only|first)\b/,
+  /\bwithout (?:modifying|changing|creating|applying|saving)\b/,
+]
+
+/**
+ * "no crees un viaje nuevo / otro viaje" says WHERE to apply (the existing
+ * trip), not that nothing may be applied. Only phrases naming a new/other
+ * trip qualify; "no crees el viaje todavía" stays a no-mutation directive.
+ */
+const NEW_TRIP_SCOPE_RE = new RegExp(
+  '\\b(?:no (?:crees|crear|generes|generar|armes|armar|hagas|hacer|abras|abrir)' +
+    '|sin (?:crear|generar|armar|abrir)' +
+    '|en (?:lugar|vez) de (?:crear|generar|armar|abrir)' +
+    "|(?:don'?t|do not|without) (?:create|creating|make|making|open|opening)) " +
+    '(?:(?:(?:un|una|uno|a) )?(?:(?:viaje|trip|itinerario|paquete) )?' +
+    '(?:nuev[oa]|distint[oa]|aparte|adicional|separad[oa]|duplicad[oa]|new|separate|duplicate)' +
+    '(?: (?:viaje|trip|itinerario|paquete))?' +
+    '|(?:otr[oa]|another)(?: (?:viaje|trip|itinerario|paquete))?)\\b',
+  'g',
+)
+
+/**
+ * A component-edit prohibition limited by a condition ("no elimines X solo
+ * porque…", "… a menos que …") constrains HOW to edit; the edit itself is
+ * allowed, so it is not a no-mutation directive. Apply/create/save/book verbs
+ * are excluded: "no apliques a menos que confirme" still means "not yet".
+ */
+const GUARDED_PROHIBITION_RE = new RegExp(
+  '\\b(?:no (?:lo |la |los |las |me |nada )?' +
+    '(?:elimines|borres|quites|reemplaces|sustituyas|cambies|modifiques|toques|descartes)' +
+    "|(?:don'?t|do not) (?:delete|remove|drop|replace|change|modify|touch|discard))\\b" +
+    '[^.;!?]{0,120}?' +
+    '(?:\\b(?:solo|solamente|unicamente|simplemente|just|only|simply|merely) (?:porque|por que|because)' +
+    '|\\ba menos que\\b|\\bsalvo (?:que|si)\\b|\\bexcepto (?:que|si)\\b|\\bunless\\b)' +
+    '[^.;!?]*',
+  'g',
+)
+
+/**
+ * The user explicitly asked not to mutate / create yet (research first).
+ * Generic phrasing only — no domain or place terms.
+ */
+export function detectNoMutationDirective(prompt: string): boolean {
+  const p = norm(prompt)
+    .replace(NEW_TRIP_SCOPE_RE, ' ')
+    .replace(GUARDED_PROHIBITION_RE, ' ')
+  if (NO_MUTATION_PATTERNS.some((re) => re.test(p))) return true
+  return RESEARCH_FIRST_RE.test(p) && !THEN_BUILD_RE.test(p)
+}
+
+/**
+ * Explicit order to apply changes to the trip. Wins over research keywords:
+ * researching is then a step of the mutation, not the whole answer.
+ */
+const EXPLICIT_APPLY_PATTERNS: RegExp[] = [
+  /\baplica(?:r|los|las)? (?:(?:estos|estas|los|las|este|esta|el|la|dichos|dichas|todos los|todas las) )?(?:cambios?|ajustes?|modificaciones?|actualizaciones?)\b/,
+  /\b(?:actualiza|modifica|cambia|ajusta|edita)(?:r)? (?:el|mi|este|nuestro) viaje\b/,
+  /\b(?:aplica|agrega|anade|actualiza)\b[^.;?]{0,60}\b(?:al|a mi|a este|en el|en mi) viaje (?:existente|actual|guardado)\b/,
+  /\bapply (?:these |the |those )?(?:changes|updates)\b/,
+]
+
 /**
  * Heuristic intent routing (no extra LLM call).
  * Prefer research as default so tool loop remains available;
@@ -32,6 +107,13 @@ export function classifyAskIntent(
   const p = norm(prompt)
 
   if (
+    EXPLICIT_APPLY_PATTERNS.some((re) => re.test(p)) &&
+    !detectNoMutationDirective(prompt)
+  ) {
+    return 'mutation'
+  }
+
+  if (
     /verifica en internet|busca en (la )?web|search online|en internet|usa websearch|fetchurl/.test(
       p,
     ) ||
@@ -43,8 +125,11 @@ export function classifyAskIntent(
     return 'research'
   }
 
+  // "no crear/aplicar todavía" negates the mutation verbs below.
+  if (detectNoMutationDirective(prompt)) return 'research'
+
   if (
-    /\b(cambia|cambiar|actualiza|actualizar|agrega|agregar|anade|anadir|añade|añadir|modifica|modificar|reemplaza|reemplazar|quita|quitar|elimina|eliminar|aplica|aplicar)\b/.test(
+    /\b(cambia|cambiar|actualiza|actualizar|agrega|agregar|anade|anadir|añade|añadir|modifica|modificar|reemplaza|reemplazar|quita|quitar|elimina|eliminar|aplica|aplicar|reorganiza|reorganizar)\b/.test(
       p,
     )
   ) {

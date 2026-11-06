@@ -15,6 +15,25 @@ function formatWhen(iso?: string): string | undefined {
   return iso
 }
 
+function quoteExtraRows(
+  card: TripPanelCard,
+): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = []
+  const consulted = formatWhen(card.checkedAt)
+  if (consulted) rows.push({ label: 'Consulta', value: consulted })
+  if (card.nextAction) {
+    rows.push({ label: 'Siguiente acción', value: card.nextAction })
+  }
+  for (const prior of card.priceHistory ?? []) {
+    const when = formatWhen(prior.checkedAt) ?? prior.checkedAt
+    rows.push({
+      label: `Precio anterior ${when}`,
+      value: formatPrice(prior.amount, prior.currency) ?? String(prior.amount),
+    })
+  }
+  return rows
+}
+
 function formatPrice(price?: number, currency?: string): string | undefined {
   if (price === undefined) return undefined
   if (currency) return `${price} ${currency}`
@@ -50,6 +69,15 @@ function CardShell({
       {children}
     </article>
   )
+}
+
+/** Long source URLs read as a short "Ver fuente · host" link. */
+function sourceLabel(url: string): string {
+  try {
+    return `Ver fuente · ${new URL(url).hostname.replace(/^www\./, '')}`
+  } catch {
+    return 'Ver fuente'
+  }
 }
 
 function FieldList({
@@ -116,8 +144,9 @@ export function FlightCard({
   if (card.provider) rows.push({ label: 'Aerolínea', value: card.provider })
   if (price) rows.push({ label: 'Precio', value: price })
   if (card.sourceUrl) {
-    rows.push({ label: 'Fuente', value: card.sourceUrl, href: card.sourceUrl })
+    rows.push({ label: 'Fuente', value: sourceLabel(card.sourceUrl), href: card.sourceUrl })
   }
+  rows.push(...quoteExtraRows(card))
   if (card.notes) rows.push({ label: 'Notas', value: card.notes })
 
   const arrival = card.airportArrival
@@ -175,8 +204,9 @@ export function LodgingCard({
     rows.push({ label: 'Precio', value: 'Pendiente de verificar' })
   }
   if (card.sourceUrl) {
-    rows.push({ label: 'Fuente', value: card.sourceUrl, href: card.sourceUrl })
+    rows.push({ label: 'Fuente', value: sourceLabel(card.sourceUrl), href: card.sourceUrl })
   }
+  rows.push(...quoteExtraRows(card))
   if (card.notes) rows.push({ label: 'Notas', value: card.notes })
   return (
     <CardShell
@@ -208,8 +238,9 @@ export function GroundCard({
   if (card.provider) rows.push({ label: 'Operador', value: card.provider })
   if (price) rows.push({ label: 'Precio', value: price })
   if (card.sourceUrl) {
-    rows.push({ label: 'Fuente', value: card.sourceUrl, href: card.sourceUrl })
+    rows.push({ label: 'Fuente', value: sourceLabel(card.sourceUrl), href: card.sourceUrl })
   }
+  rows.push(...quoteExtraRows(card))
   if (card.notes) rows.push({ label: 'Notas', value: card.notes })
   return (
     <CardShell
@@ -248,8 +279,9 @@ export function ActivityCard({
     })
   }
   if (card.sourceUrl) {
-    rows.push({ label: 'Fuente', value: card.sourceUrl, href: card.sourceUrl })
+    rows.push({ label: 'Fuente', value: sourceLabel(card.sourceUrl), href: card.sourceUrl })
   }
+  rows.push(...quoteExtraRows(card))
   if (card.notes) rows.push({ label: 'Notas', value: card.notes })
   return (
     <CardShell
@@ -291,8 +323,8 @@ export function SourceCard({ card }: { card: TripPanelCard }) {
     <CardShell card={card}>
       {card.sourceUrl && (
         <p className="tp-source-link">
-          <a href={card.sourceUrl} target="_blank" rel="noreferrer">
-            {card.sourceUrl}
+          <a href={card.sourceUrl} target="_blank" rel="noreferrer" title={card.sourceUrl}>
+            {sourceLabel(card.sourceUrl)}
           </a>
         </p>
       )}

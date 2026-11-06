@@ -16,9 +16,11 @@ import {
   detectDependencyWarnings,
   flightScheduleConfidenceLabels,
   formatDateLongEs,
+  optionDetailLines,
   type TravelOptionLike,
 } from '../../application/askTravelProposalView'
 import type { Trip } from '../../domain/types'
+import { PrintButton } from '../PrintButton'
 import { useOnline } from '../useOnline'
 import { safeDisplayText } from '../../../shared/displaySanitize'
 
@@ -26,7 +28,6 @@ function optionPrimarySource(o: TravelOptionLike): string {
   const parts: string[] = []
   if (o.sourceType) parts.push(o.sourceType)
   if (o.provider) parts.push(o.provider)
-  if (o.sourceUrl) parts.push(o.sourceUrl)
   if (o.checkedAt) parts.push(`checked ${o.checkedAt}`)
   const confidence = flightScheduleConfidenceLabels(o)
   if (confidence.length) parts.push(confidence.join(' · '))
@@ -471,13 +472,18 @@ export function AskTravelPage() {
                 {normalizedOptions.map((o) => {
                   const ext = String(o.externalId ?? '')
                   const labels = flightScheduleConfidenceLabels(o)
+                  const details = optionDetailLines(o)
                   return (
                     <li key={ext}>
                       <strong>{safeDisplayText(o.title ?? ext)}</strong>
                       {o.startAt
                         ? ` · ${safeDisplayText(o.startAt, '')}`
                         : ''}
-                      <br />
+                      {details.map((line) => (
+                        <div key={line} className="ask-option-detail">
+                          {safeDisplayText(line, '')}
+                        </div>
+                      ))}
                       <span className="muted">
                         {safeDisplayText(
                           optionPrimarySource(o),
@@ -550,6 +556,7 @@ export function AskTravelPage() {
             <button type="button" onClick={handleDiscard} disabled={busy}>
               Descartar
             </button>
+            <PrintButton subject={`Propuesta ${selectedTrip?.title ?? ''}`} />
           </div>
 
           {confirmOpen && counts && (

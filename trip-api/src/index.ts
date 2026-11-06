@@ -16,6 +16,13 @@ import { prepareMutationPlan } from './prepareMutationPlan.ts'
 import { compilePreviewBodySchema } from '../../shared/agentContracts.ts'
 import { migrate } from './schema.ts'
 import { ConflictError, NotFoundError, store } from './store.ts'
+import {
+  guestAccess,
+  guestDenial,
+  guestVisible,
+  requestWorkspace,
+  type GuestAccess,
+} from './ownership.ts'
 import type {
   Booking,
   ChecklistItem,
@@ -339,6 +346,7 @@ async function handleByIdGet(
   res: http.ServerResponse,
   collection: string,
   entityId: string,
+  guest: GuestAccess | null = null,
 ) {
   let row: unknown
   switch (BY_ID_TABLES.get(collection)) {
@@ -366,7 +374,7 @@ async function handleByIdGet(
     default:
       return sendJson(res, 404, { error: 'unknown collection' })
   }
-  if (!row) return sendJson(res, 404, { error: 'not found' })
+  if (!row || guestVisible(guest, [row]).length === 0) return sendJson(res, 404, { error: 'not found' })
   return sendJson(res, 200, row)
 }
 
@@ -385,6 +393,20 @@ async function handleRequest(
   const method = req.method || 'GET'
   // Optional audit header (set by ForwardAuth); shared workspace for v1.
   void auditUser(req)
+
+  const guest = guestAccess(
+    req.headers['x-viajes-user'],
+    process.env.TRIP_GUEST_USER,
+    process.env.TRIP_GUEST_TRIPS,
+  )
+  if (guest) {
+    res.setHeader('X-Tool4trip-Access', 'read-only')
+    const denied = guestDenial(guest, method, route)
+    if (denied) {
+      sendJson(res, denied.status, { error: denied.error })
+      return
+    }
+  }
 
   try {
     if (route.kind === 'health') {
@@ -527,7 +549,8 @@ async function handleRequest(
 
     if (route.kind === 'trips') {
       if (method === 'GET') {
-        sendJson(res, 200, await store.listTrips(pool))
+        const trips = await store.listTrips(pool)
+        sendJson(res, 200, guest ? trips.filter((t: Trip) => guest.trips.has(t.id)) : trips)
         return
       }
       if (method === 'POST') {
@@ -596,7 +619,16 @@ async function handleRequest(
         return
       }
       if (method === 'DELETE') {
-        const ok = await store.deleteTrip(pool, route.tripId)
+        const workspace = requestWorkspace(
+          req.headers['x-viajes-user'],
+          process.env.TRIP_OWNER_USER,
+        )
+        if (!workspace) {
+          sendJson(res, 401, { error: 'authentication required' })
+          return
+        }
+        // Dependent rows go with it (ON DELETE CASCADE).
+        const ok = await store.deleteTrip(pool, route.tripId, workspace)
         if (!ok) {
           sendJson(res, 404, { error: 'not found' })
           return
@@ -617,7 +649,7 @@ async function handleRequest(
         sendJson(
           res,
           200,
-          await store.listRemindersByItem(pool, route.entityId),
+          guestVisible(guest, await store.listRemindersByItem(pool, route.entityId)),
         )
         return
       }
@@ -629,7 +661,7 @@ async function handleRequest(
         sendJson(
           res,
           200,
-          await store.listTravelOptionsByPackage(pool, route.entityId),
+          guestVisible(guest, await store.listTravelOptionsByPackage(pool, route.entityId)),
         )
         return
       }
@@ -685,7 +717,7 @@ async function handleRequest(
         return
       }
       if (method === 'GET') {
-        await handleByIdGet(pool, res, route.collection, route.entityId)
+        await handleByIdGet(pool, res, route.collection, route.entityId, guest)
         return
       }
       sendJson(res, 405, { error: 'method not allowed' })
@@ -694,7 +726,7 @@ async function handleRequest(
 
     if (route.kind === 'byId' && route.collection && route.entityId) {
       if (method === 'GET') {
-        await handleByIdGet(pool, res, route.collection, route.entityId)
+        await handleByIdGet(pool, res, route.collection, route.entityId, guest)
         return
       }
       if (method === 'DELETE') {

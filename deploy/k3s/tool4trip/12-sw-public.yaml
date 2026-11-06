@@ -1,0 +1,72 @@
+# Service worker scripts must be readable without a session.
+# Otherwise an already installed worker cannot update, and it keeps
+# serving the Tool4Trip shell for /celestina and /pinalove.
+# /index.html too: the worker precaches it, and behind the session check
+# an update without a session stored the login page as the app shell.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tool4trip-sw-public
+  namespace: tool4trip
+  labels:
+    app: tool4trip-web
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4trip.com
+      http:
+        paths:
+          - path: /sw.js
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80
+          - path: /index.html
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80
+          - path: /workbox-
+            pathType: Prefix
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80
+    - host: www.tool4trip.com
+      http:
+        paths:
+          - path: /sw.js
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80
+          - path: /index.html
+            pathType: Exact
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80
+          - path: /workbox-
+            pathType: Prefix
+            backend:
+              service:
+                name: tool4trip-web
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - tool4trip.com
+        - www.tool4trip.com
+      secretName: tool4trip-tls

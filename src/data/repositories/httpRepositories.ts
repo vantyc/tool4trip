@@ -83,11 +83,25 @@ function collectionRepo<T extends { id: string; tripId: string; updatedAt?: stri
       }
     },
     put: async (row) => {
+      const current = await apiFetch<{ updatedAt?: string }>(
+        `/api/${collection}/${encodeURIComponent(row.id)}`,
+      ).catch((err: unknown) => {
+        if (
+          err &&
+          typeof err === 'object' &&
+          'status' in err &&
+          err.status === 404
+        ) {
+          return undefined
+        }
+        throw err
+      })
       await apiFetch(
         `/api/trips/${encodeURIComponent(row.tripId)}/${collection}/${encodeURIComponent(row.id)}`,
         {
           method: 'PUT',
           body: JSON.stringify(row),
+          expectUpdatedAt: current?.updatedAt,
         },
       )
     },
@@ -248,24 +262,4 @@ export async function apiCompilePreview(
       body: JSON.stringify(body),
     },
   )
-}
-
-export type TripMigrateBundle = {
-  trip: Trip
-  bookings?: Booking[]
-  travelOptions?: TravelOption[]
-  itineraryItems?: ItineraryItem[]
-  reminders?: Reminder[]
-  checklistItems?: ChecklistItem[]
-  notes?: Note[]
-  packageImports?: PackageImport[]
-}
-
-export async function apiMigrateTrips(
-  trips: TripMigrateBundle[],
-): Promise<{ ok: boolean; tripIds: string[]; count: number }> {
-  return apiFetch('/api/trips/migrate', {
-    method: 'POST',
-    body: JSON.stringify({ trips }),
-  })
 }

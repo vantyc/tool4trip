@@ -4,6 +4,7 @@ import {
   augmentContextWithProvenFlightSchedules,
   stampProvenScheduleOptions,
 } from '../flights/mergeSchedules.ts'
+import { claimTargetOption, dropUnsupportedPhones } from './entityEvidence.ts'
 import { demoteUnverifiedExternalEventDates } from './eventDateGrounding.ts'
 import { scrubUnsupportedFreeTextAssertions } from './researchCoverage.ts'
 
@@ -498,16 +499,15 @@ function numbersCovered(statementNums: string[], quotedNums: string[]): boolean 
   return statementNums.every((n) => q.has(n))
 }
 
+/** Same word family only (vuelos ≈ vuelo ≈ flight); a different mode never covers. */
 function modesCovered(statementModes: string[], quotedModes: string[]): boolean {
   if (statementModes.length === 0) return true
-  const q = new Set(quotedModes.map((m) => normalizeEvidenceText(m)))
-  return statementModes.every((m) => q.has(normalizeEvidenceText(m)))
+  return statementModes.every((m) => quotedModes.some((q) => modesEquivalent(m, q)))
 }
 
 function statusCovered(statementStatus: string[], quotedStatus: string[]): boolean {
   if (statementStatus.length === 0) return true
-  const q = new Set(quotedStatus.map((m) => normalizeEvidenceText(m)))
-  return statementStatus.every((m) => q.has(normalizeEvidenceText(m)))
+  return statementStatus.every((m) => quotedStatus.some((q) => statusEquivalent(m, q)))
 }
 
 /** Strip LLM-supplied quotedFact/sourceTitle (server owns them). */
@@ -833,7 +833,7 @@ export function validateClaimsAgainstToolTrace(
         index,
         claim,
         code: 'status_ungrounded',
-        message: `status word in statement not explicit in evidence: [${stmtStatus.join(',')}]; "0 salidas" does not imply suspensión`,
+        message: `status word in statement not explicit in evidence: [${stmtStatus.join(',')}]${stmtStatus.some((w) => /suspend|cancel/.test(w)) ? '; "0 salidas" does not imply suspensión' : ''}`,
       })
       return
     }
@@ -1128,7 +1128,15 @@ export function scrubOperationalFreeText(text: string): string {
     if (extractOperationalSignals(p, 'scrub').length > 0) continue
     kept.push(p)
   }
-  return kept.join(' ').replace(/\s+/g, ' ').trim()
+  // The residual scan reads the whole text: a mode word gains price context from
+  // numbers in another kept sentence, so drop sentences carrying such modes too.
+  const crossModes = extractOperationalSignals(kept.join(' '), 'scrub').flatMap((s) => s.modes)
+  const out = crossModes.length
+    ? kept.filter(
+        (p) => !extractTransportModes(p).some((m) => crossModes.some((c) => modesEquivalent(m, c))),
+      )
+    : kept
+  return out.join(' ').replace(/\s+/g, ' ').trim()
 }
 
 function symbolToIso(sym: string): string | undefined {
@@ -1263,12 +1271,10 @@ export function applyClaimsSourceOfTruth(
   }
 
   const priceClaims = validClaims.filter((c) => c.kind === 'price')
-  priceClaims.forEach((claim, i) => {
+  priceClaims.forEach((claim) => {
     const fields = priceFieldsFromClaim(claim)
     if (!fields) return
-    const target =
-      (options[i] as Record<string, unknown> | undefined) ||
-      (options[0] as Record<string, unknown> | undefined)
+    const target = claimTargetOption(claim, options)
     if (!target) return
     target.priceObserved = fields.priceObserved
     target.currency = fields.currency
@@ -1283,13 +1289,11 @@ export function applyClaimsSourceOfTruth(
     }
   })
 
-  // Re-attach non-price claim statements as notes on first option when present
-  const otherClaims = validClaims.filter((c) => c.kind !== 'price')
-  if (otherClaims.length && options[0] && typeof options[0] === 'object') {
-    const t0 = options[0] as Record<string, unknown>
-    for (const c of otherClaims) {
-      t0.notes = appendNote(t0.notes, `Hecho (${c.kind}): ${c.statement}`)
-    }
+  // Unlinked claims stay only in the evidence warnings above.
+  for (const c of validClaims) {
+    if (c.kind === 'price') continue
+    const target = claimTargetOption(c, options)
+    if (target) target.notes = appendNote(target.notes, `Hecho (${c.kind}): ${c.statement}`)
   }
 
   pkg.travelOptions = options
@@ -1561,6 +1565,7 @@ export function assertDraftGrounded(
         `server: ${stamped.stampedExternalIds.length} travelOption(s) stamped flight_schedule from searchFlightSchedules (${stamped.stampedExternalIds.join(', ')}).`,
       )
     }
+    stampWarnings.push(...dropUnsupportedPhones(draft.package, toolTrace))
   }
   const groundingContext = augmentContextWithProvenFlightSchedules(
     context,

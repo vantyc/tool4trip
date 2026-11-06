@@ -14,7 +14,16 @@ import {
   type ComponentActionControlsProps,
 } from '../tripPanel/ComponentActionControls'
 import { BookForm, ItemEditForm } from './BoardForms'
-import { money, ROLE_LABEL, STATUS_LABEL, TYPE_LABEL } from './boardFormat'
+import {
+  hostOf,
+  ITEM_STATUS_LABEL,
+  money,
+  PAY_LABEL,
+  payState,
+  ROLE_LABEL,
+  splitLinks,
+  TYPE_LABEL,
+} from './boardFormat'
 
 export type GetActionProps = (card: TripPanelCard) => Omit<ComponentActionControlsProps, 'card'>
 
@@ -61,13 +70,20 @@ function rowsFor(item: BoardItem): Row[] {
         ? [formatWhenEs(item.startAt), where(item.origin)].filter(Boolean).join(' — ')
         : undefined,
     )
-    push(
-      'Llega',
-      item.endAt || item.destination
-        ? [formatWhenEs(item.endAt), where(item.destination)].filter(Boolean).join(' — ')
-        : undefined,
-    )
-    push('Duración', formatDuration(minutesBetween(item.startAt, item.endAt)))
+    const span = minutesBetween(item.startAt, item.endAt)
+    if (span !== undefined && span > 48 * 60) {
+      // One record for a whole round trip: endAt is the end of the return, not this arrival.
+      push('Destino', where(item.destination))
+      push('Termina', formatWhenEs(item.endAt) ? `${formatWhenEs(item.endAt)} (fin del viaje redondo)` : undefined)
+    } else {
+      push(
+        'Llega',
+        item.endAt || item.destination
+          ? [formatWhenEs(item.endAt), where(item.destination)].filter(Boolean).join(' — ')
+          : undefined,
+      )
+      push('Duración', formatDuration(span))
+    }
     push('Equipaje', item.baggage)
   } else if (item.kind === 'lodging') {
     push('Hotel', item.provider)
@@ -97,20 +113,35 @@ function rowsFor(item: BoardItem): Row[] {
     }
   }
 
-  push(
-    'Precio',
-    item.includedWith
-      ? `Incluido en el boleto de ${item.includedWith}${item.price !== undefined ? ` (${money(item.price, item.currency)})` : ''}`
-      : (money(item.price, item.currency) ?? 'Por cotizar'),
-  )
-  if (item.paid !== undefined || item.status === 'booked') {
-    push('Pagado', money(item.paid ?? 0, item.currency))
+  if (item.includedWith) {
+    push('Precio', `Incluido en el boleto de ${item.includedWith} (ida y vuelta, se cuenta una vez)`)
+  } else {
+    push(
+      'Precio',
+      item.price !== undefined
+        ? `${money(item.price, item.currency)}${item.includes?.length ? ` · boleto ida y vuelta, incluye ${item.includes.join(', ')}` : ''}`
+        : 'Sin cotizar',
+    )
   }
-  push('Confirmación', item.confirmation)
+  if (item.checkedAt && item.price !== undefined && !item.includedWith) {
+    push(
+      'Consultado',
+      `${formatWhenEs(item.checkedAt)}${item.status === 'booked' ? '' : ' · el precio puede haber cambiado'}`,
+    )
+  }
+  push('Reserva', item.status === 'booked' ? `Reservado${item.confirmation ? ` · ${item.confirmation}` : ''}` : 'Sin reservar')
+  if (!item.includedWith && (item.price !== undefined || item.status === 'booked')) {
+    const state = payState(item)
+    push(
+      'Pagado',
+      state === 'unpaid'
+        ? 'Nada pagado'
+        : `${money(item.paid, item.currency)}${state === 'partial' && item.price !== undefined ? ` de ${money(item.price, item.currency)}` : ''}`,
+    )
+  }
   push('Asiento', item.seat)
   push('Terminal', item.terminal)
   push('Puerta', item.gate)
-  push('Consultado', item.checkedAt ? formatWhenEs(item.checkedAt) : undefined)
   push('Siguiente paso', item.nextAction)
   return rows
 }
@@ -130,6 +161,12 @@ export function ItemBlock({
 }) {
   const [mode, setMode] = useState<'view' | 'edit' | 'book'>('view')
   const card = agentCard(item)
+  const pay = payState(item)
+  const showPay = !item.includedWith && (item.price !== undefined || item.status === 'booked')
+  const notes = item.notes ? splitLinks(item.notes) : undefined
+  const links = [item.url, ...(notes?.urls ?? [])].filter(
+    (u, i, all): u is string => Boolean(u) && all.indexOf(u) === i,
+  )
 
   const done = () => {
     setMode('view')
@@ -146,7 +183,12 @@ export function ItemBlock({
           </p>
           <h4>{item.title}</h4>
         </div>
-        <span className={`tb-pill tb-pill-${item.status}`}>{STATUS_LABEL[item.status]}</span>
+        <span className="tb-pills">
+          <span className={`tb-pill tb-pill-${item.status}`}>{ITEM_STATUS_LABEL[item.status]}</span>
+          {showPay && (
+            <span className={`tb-pill tb-pay-${pay}`}>{PAY_LABEL[pay]}</span>
+          )}
+        </span>
       </header>
 
       {mode === 'edit' && (
@@ -160,7 +202,7 @@ export function ItemBlock({
         <>
           <dl className="tb-fields">
             {rowsFor(item)
-              .filter((r) => !compact || ['Vuelo', 'Proveedor', 'Hotel', 'Sale', 'Llega', 'Precio', 'Check-in', 'Check-out'].includes(r.label))
+              .filter((r) => !compact || ['Vuelo', 'Proveedor', 'Hotel', 'Sale', 'Llega', 'Destino', 'Precio', 'Check-in', 'Check-out'].includes(r.label))
               .map((r) => (
                 <div key={r.label}>
                   <dt>{r.label}</dt>
@@ -168,30 +210,38 @@ export function ItemBlock({
                 </div>
               ))}
           </dl>
-          {item.notes && !compact && (
+          {notes && notes.text.trim() && !compact && (
             <details className="tb-notes">
               <summary>Notas</summary>
-              <p>{item.notes}</p>
+              <p>{notes.text}</p>
             </details>
           )}
           <div className="tb-item-actions">
-            {item.url && (
-              <a className="tb-btn-link" href={item.url} target="_blank" rel="noreferrer">
-                {item.status === 'booked'
-                  ? 'Ver reserva'
-                  : item.kind === 'lodging'
-                    ? 'Ver hotel / reservar'
-                    : 'Ver tarifa / comprar'}
+            {links.map((url, i) => (
+              <a
+                key={url}
+                className="tb-btn-link"
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                title={url}
+              >
+                {i === 0 && url === item.url
+                  ? item.status === 'booked'
+                    ? 'Ver reserva'
+                    : 'Ver oferta'
+                  : 'Ver fuente'}
+                {hostOf(url) ? <small> · {hostOf(url)}</small> : null}
               </a>
-            )}
+            ))}
             {extraActions}
             {(item.option || item.booking) && (
-              <button type="button" className="tb-btn-quiet" onClick={() => setMode('edit')}>
+              <button type="button" className="tb-btn-quiet" data-write onClick={() => setMode('edit')}>
                 Editar
               </button>
             )}
             {item.option && item.status !== 'booked' && (
-              <button type="button" className="tb-btn-quiet" onClick={() => setMode('book')}>
+              <button type="button" className="tb-btn-quiet" data-write onClick={() => setMode('book')}>
                 Marcar reservado
               </button>
             )}

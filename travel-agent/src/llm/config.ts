@@ -48,6 +48,12 @@ export type LlmEnvConfig = {
   timeoutMs: number
   maxTokens: number
   maxToolCalls: number
+  /**
+   * Upper bound for multi-objective research (event discovery / destination
+   * selection). A ceiling, not a target: per-dimension limits and closing
+   * unproductive lines end research first. Falls back to 12 when absent.
+   */
+  maxToolCallsMultiObjective?: number
   maxSteps: number
   enableWebTools: boolean
   webSearchProvider: string
@@ -66,7 +72,11 @@ export function loadLlmEnv(
   // Optional completion size cap (defaults leave room for AgentProposal JSON).
   const maxTokens = positiveInt(env.LLM_MAX_TOKENS, 8192)
   const maxToolCalls = positiveInt(env.AGENT_MAX_TOOL_CALLS, 6)
-  const maxSteps = positiveInt(env.AGENT_MAX_STEPS, 8)
+  const maxToolCallsMultiObjective = Math.max(
+    maxToolCalls,
+    positiveInt(env.AGENT_MAX_TOOL_CALLS_MULTI_OBJECTIVE, 12),
+  )
+  const maxSteps = positiveInt(env.AGENT_MAX_STEPS, 10)
   const enableWebTools = env.ENABLE_WEB_TOOLS !== '0'
   const webSearchProvider = (env.WEB_SEARCH_PROVIDER || 'tavily').trim().toLowerCase()
   const enableDdgFallback = env.ENABLE_DDG_FALLBACK === '1'
@@ -80,6 +90,7 @@ export function loadLlmEnv(
     timeoutMs,
     maxTokens,
     maxToolCalls,
+    maxToolCallsMultiObjective,
     maxSteps,
     enableWebTools,
     webSearchProvider,

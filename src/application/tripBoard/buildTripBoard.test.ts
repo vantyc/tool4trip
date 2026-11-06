@@ -138,15 +138,66 @@ describe('buildTripBoard — Filipinas guardado', () => {
     assert.equal(s.quoted, 31628)
     assert.equal(s.paid, 0)
     assert.equal(s.toPay, 31628)
-    assert.deepEqual(s.toBook, ['UA822', 'UA809'])
-    assert.equal(s.toQuote.length, 5)
-    assert.ok(s.toDecide.includes('Manila → El Nido: 2 opciones'))
+    assert.equal(s.startsAt, '2026-11-14T05:45:00-06:00')
+    assert.equal(s.endsAt, '2026-11-28T19:35:00-06:00')
+    assert.equal(s.quotedTransport, 31628)
+    assert.equal(s.quotedLodging, 0)
+    assert.deepEqual(s.missing, { hotels: 3, legs: 2, legsAreFlights: true })
   })
 
-  it('avisa que el viaje guardado termina el 29 y el último vuelo llega el 28', () => {
+  it('cada boleto liga ida y regreso y cuenta su precio una vez', () => {
     assert.deepEqual(
-      board.alerts.map((a) => a.text),
-      ['El viaje guardado termina el 29 nov, pero el último tramo llega el 28 nov.'],
+      board.summary.tickets.map((t) => [t.label, t.price, t.roundTrip, t.withBaggage, t.legIds]),
+      [
+        ['UA822 + UA817', 13105, true, true, ['leg-1', 'leg-6']],
+        ['UA809 + UA190', 18523, true, true, ['leg-2', 'leg-5']],
+      ],
+    )
+    assert.deepEqual(board.legs[0]!.segments[0]!.includes, ['UA817'])
+    assert.equal(board.legs[5]!.segments[0]!.includedWithId, 'filipinas-nov-2026-01-ua822')
+  })
+
+  it('pendientes concretos: traslados, hoteles y boletos por reservar', () => {
+    assert.deepEqual(
+      board.tasks.map((t) => `${t.group}: ${t.text}`),
+      [
+        'quote: Manila → El Nido',
+        'quote: El Nido → Manila',
+        'hotels: Hotel en Manila · 1ª vez',
+        'hotels: Hotel en El Nido',
+        'hotels: Hotel en Manila · 2ª vez',
+        'book: Boleto UA822 + UA817',
+        'book: Boleto UA809 + UA190',
+      ],
+    )
+    assert.equal(board.tasks[0]!.detail, '17 nov · 2 rutas guardadas, sin precio')
+    assert.match(board.tasks.at(-1)!.detail!, /18,523 MXN · consultado 3 nov/)
+  })
+
+  it('el 29 es el límite de regreso: llegar el 28 no es un aviso', () => {
+    assert.equal(board.summary.returnLimit, '2026-11-29')
+    assert.deepEqual(board.alerts, [])
+  })
+
+  it('avisa si el regreso pasa del límite', () => {
+    const b = filipinasNov2026Bundle()
+    const late = buildTripBoard({
+      trip: { ...b.trip, endDate: '2026-11-27' },
+      options: b.travelOptions,
+    })
+    assert.deepEqual(
+      late.alerts.map((a) => a.text),
+      ['El regreso llega el 28 nov, después del límite del viaje (27 nov).'],
+    )
+  })
+
+  it('estancias seguidas sin vuelo elegido pueden repartirse noches', () => {
+    assert.deepEqual(
+      board.splits.map((s) => [s.from, s.to, s.total, s.firstNights]),
+      [
+        ['2026-11-15', '2026-11-27', 12, 2],
+        ['2026-11-17', '2026-11-28', 11, 10],
+      ],
     )
   })
 })
@@ -216,7 +267,59 @@ describe('buildTripBoard — cambios', () => {
     assert.equal(seg.confirmation, 'ABC123')
     assert.equal(board.legs[0]!.status, 'booked')
     assert.equal(board.summary.paid, 13105)
-    assert.deepEqual(board.summary.toBook, ['UA809'])
+    assert.equal(board.summary.booked, 1)
+    assert.deepEqual(
+      board.tasks.filter((t) => t.group === 'book').map((t) => t.text),
+      ['Boleto UA809 + UA190'],
+    )
+  })
+
+  it('Cebú sin fechas va entre El Nido y Manila y reparte las noches de El Nido', () => {
+    const board = filipinas([
+      lodging({
+        id: 'ceb',
+        title: 'Pendiente — hotel en Cebú, fechas por definir',
+        destination: 'Cebú',
+        stayWindow: { from: '2026-11-17', to: '2026-11-27' },
+      }),
+    ])
+    assert.deepEqual(
+      board.stops.map((s) => stopTitle(s)),
+      [
+        'Ciudad de México',
+        'San Francisco',
+        'Manila · 1ª vez',
+        'El Nido',
+        'Cebú',
+        'Manila · 2ª vez',
+        'San Francisco',
+        'Ciudad de México · regreso',
+      ],
+    )
+    const [eni, ceb] = [board.stops[3]!, board.stops[4]!]
+    assert.equal(eni.datesPending, true)
+    assert.equal(eni.checkOut, undefined)
+    assert.equal(eni.nights, undefined)
+    assert.equal(ceb.datesPending, true)
+    assert.deepEqual(ceb.window, { from: '2026-11-17', to: '2026-11-27' })
+    assert.deepEqual(
+      board.splits.map((s) => [s.firstStopId, s.secondStopId, s.total, s.firstNights]),
+      [[eni.id, ceb.id, 10, undefined]],
+    )
+    const toCeb = board.legs.find((l) => l.toStopId === ceb.id)!
+    const fromCeb = board.legs.find((l) => l.fromStopId === ceb.id)!
+    assert.equal(toCeb.dateHint, undefined)
+    assert.equal(fromCeb.dateHint, '2026-11-27')
+    assert.ok(toCeb.related.some((r) => r.id === 'filipinas-nov-2026-p-eni-mnl-ceb'))
+    assert.ok(!fromCeb.related.some((r) => r.role === 'alternative'))
+    assert.deepEqual(board.tasks[0], {
+      id: `dates-${ceb.id}`,
+      group: 'dates',
+      text: 'Elegir fechas de Cebú',
+      detail: 'Repartir 10 noches entre El Nido y Cebú (17 nov – 27 nov)',
+      stopId: ceb.id,
+    })
+    assert.deepEqual(board.alerts.filter((a) => a.level === 'warn'), [])
   })
 
   it('un hotel elegido que empieza un día después de llegar deja una noche sin hotel', () => {

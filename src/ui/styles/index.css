@@ -1,5 +1,7 @@
 :root {
-  color-scheme: light;
+  /* "only" opts out of Chromium's forced dark mode (Brave, Chrome flag), which
+     otherwise inverts this palette and leaves the text with very low contrast. */
+  color-scheme: only light;
   --bg: #f4f0e8;
   --bg-accent: #e4ddd0;
   --ink: #1a3a4a;
@@ -7,8 +9,42 @@
   --line: #c8c0b0;
   --ok: #2d6a4f;
   --bad: #9b2226;
+  /* Text on --ink fills, cards, light mixing tone, form fields, colored text. */
+  --on-ink: #fff;
+  --card: #fffdf8;
+  --paper: #fff;
+  --field: #fff;
+  --warn-ink: #6b5b2e;
+  --info-ink: #1a4a6a;
   --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
   --font-body: 'Segoe UI', 'Helvetica Neue', sans-serif;
+}
+
+/* Dark theme, chosen with the header toggle. Screen only: printing stays light. */
+@media screen {
+  :root[data-theme='dark'] {
+    color-scheme: only dark;
+    --bg: #11191d;
+    --bg-accent: #1e2a30;
+    --ink: #e1e8ea;
+    --ink-muted: #a5b5bb;
+    --line: #34464e;
+    --ok: #6cc497;
+    --bad: #f0898d;
+    --on-ink: #11191d;
+    --card: #18232a;
+    --paper: #1b272e;
+    --field: #0f1619;
+    --warn-ink: #d4c48a;
+    --info-ink: #8cc3e6;
+  }
+
+  :root[data-theme='dark'] body {
+    background:
+      radial-gradient(ellipse 120% 80% at 10% -20%, #16252b 0%, transparent 55%),
+      radial-gradient(ellipse 90% 60% at 100% 0%, #1a2226 0%, transparent 50%),
+      var(--bg);
+  }
 }
 
 *,

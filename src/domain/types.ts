@@ -62,10 +62,17 @@ export interface TravelGoal {
   label: string
 }
 
+export interface TripBudget {
+  /** Most the whole trip may cost, in `currency`. */
+  cap: number
+  currency: string
+}
+
 export interface Trip {
   id: string
   title: string
   destination?: string
+  budget?: TripBudget
   /** Inclusive trip range as calendar dates (YYYY-MM-DD), interpreted in Trip.timezone. */
   startDate: string
   endDate: string
@@ -282,6 +289,11 @@ export interface TravelOption {
   amountPaid?: number
   /** What to do next. Not a booking. */
   nextAction?: string
+  /**
+   * Lodging without dates yet: the stay falls somewhere inside these local
+   * dates (YYYY-MM-DD). Cleared once startAt/endAt are set.
+   */
+  stayWindow?: { from: string; to: string }
   verificationStatus?: VerificationStatus
   sourceType: TravelOptionSourceType
   notes?: string

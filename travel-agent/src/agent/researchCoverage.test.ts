@@ -126,6 +126,30 @@ describe('researchCoverage', () => {
     )
   })
 
+  it('no place hardcodes: generic lodging label; any hotel-titled hit is a candidate', () => {
+    const goals = deriveResearchGoals(SMA_PROMPT)
+    const lodging = goals.find((g) => g.kind === 'lodging_destination')!
+    assert.equal(lodging.label, 'Hospedaje en destino')
+    for (const town of ['Villa Alba', 'Cerro Claro']) {
+      const decisions = classifyCandidates(
+        [
+          traceSearch(`hoteles ${town}`, [
+            {
+              url: `https://example.org/${town.replace(' ', '-').toLowerCase()}/hotel-plaza`,
+              title: `Hotel Plaza ${town}`,
+              snippet: 'Calle Hidalgo 4, habitaciones',
+            },
+          ]),
+        ],
+        goals,
+        ['2026-09-19'],
+      )
+      const d = decisions.find((x) => x.goalIds.includes('goal-lodging-dest'))!
+      assert.equal(d.decision, 'accepted', town)
+      assert.equal(d.reason, 'accepted_partial', town)
+    }
+  })
+
   it('named hotel hit without fetch → not verified (partial candidate only)', () => {
     const goals = deriveResearchGoals(SMA_PROMPT)
     const toolTrace = [
@@ -176,6 +200,33 @@ describe('researchCoverage', () => {
             c.reason === 'accepted_partial'),
       ),
     )
+  })
+
+  it('research-only: a grounded claim URL is a grounded finding, distinct from package anchoring (6d70789e)', () => {
+    const goals = deriveResearchGoals(SMA_PROMPT)
+    const url = 'https://www.sanmiguelelalto.gob.mx/turismo/opc/detalle/hotel-san-miguel'
+    const toolTrace = [
+      traceSearch('hoteles San Miguel el Alto', [
+        { url, title: 'Hotel San Miguel', snippet: 'Genáro Alcalá #10 San Miguel El Alto Teléfono: 347 788 2132' },
+      ]),
+    ]
+    const base = {
+      goals,
+      toolTrace,
+      toolRounds: 1,
+      toolCallsUsed: 1,
+      maxToolCalls: 6,
+      forcedExtraRounds: 0,
+      package: { travelOptions: [] },
+      tripDates: ['2026-09-19'],
+    }
+    const diag = buildResearchDiagnostics({ ...base, groundedSourceUrls: [url] })
+    assert.equal(diag.anchoredSourceCount, 0, 'package anchoring semantics unchanged')
+    const c = diag.candidates.find((x) => x.url === url && x.reason !== 'duplicate')!
+    assert.equal(c.decision, 'accepted')
+    assert.equal(c.reason, 'grounded_claim')
+    const without = buildResearchDiagnostics(base)
+    assert.ok(!without.candidates.some((x) => x.reason === 'grounded_claim'))
   })
 
   it('valid anchored hit → sourceUrl counts as anchored', () => {

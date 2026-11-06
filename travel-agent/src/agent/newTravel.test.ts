@@ -180,6 +180,103 @@ describe('new_travel coherence', () => {
     assert.equal(airportish.length, 0)
   })
 
+  it('several event keywords → at most ONE traveler-intent item (no per-keyword items)', () => {
+    const prompt =
+      'Quiero ir a la serenata de las fiestas patronales con feria, grito y concierto en Villa Alba el sábado 3 de octubre de 2026'
+    const pkg = ensureNewTravelSkeleton(
+      {
+        trip: {
+          id: 't2',
+          title: 'Villa Alba',
+          destination: 'Villa Alba',
+          startDate: '2026-10-02',
+          endDate: '2026-10-04',
+          timezone: 'America/Mexico_City',
+          goals: [],
+          status: 'planned',
+        },
+        travelOptions: [],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+      },
+      prompt,
+    )
+    const goalItems = (pkg.itineraryItems as Rec[]).filter((i) =>
+      String(i.externalId).startsWith('goal-'),
+    )
+    assert.equal(goalItems.length, 1)
+    assert.match(String(goalItems[0]!.title), /^Serenata/)
+    assert.match(String(goalItems[0]!.notes), /Fecha objetivo: 2026-10-03/)
+    const goalChecks = (pkg.checklistItems as Rec[]).filter((c) =>
+      String(c.externalId).startsWith('chk-goal-'),
+    )
+    assert.equal(goalChecks.length, 1)
+  })
+
+  it('«patronales» alone is a modifier: fiestas patronales → one item', () => {
+    const pkg = ensureNewTravelSkeleton(
+      {
+        trip: { id: 't3', startDate: '2026-10-02', endDate: '2026-10-04' },
+        travelOptions: [],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+      },
+      'Ir a las fiestas patronales del pueblo',
+    )
+    const goalItems = (pkg.itineraryItems as Rec[]).filter((i) =>
+      String(i.externalId).startsWith('goal-'),
+    )
+    assert.equal(goalItems.length, 1)
+    assert.match(String(goalItems[0]!.title), /^Fiestas patronales/)
+  })
+
+  it('existing event item covers the goal → no extra intent item', () => {
+    const pkg = ensureNewTravelSkeleton(
+      {
+        trip: { id: 't4', startDate: '2026-10-02', endDate: '2026-10-04' },
+        travelOptions: [],
+        itineraryItems: [{ externalId: 'it-1', title: 'Feria del pueblo' }],
+        checklistItems: [],
+        notes: [],
+      },
+      'serenata y feria en el pueblo',
+    )
+    assert.equal(
+      (pkg.itineraryItems as Rec[]).filter((i) =>
+        String(i.externalId).startsWith('goal-'),
+      ).length,
+      0,
+    )
+  })
+
+  it('no goal date is invented when the prompt has none', () => {
+    assert.equal(
+      inferGoalDate('quiero ir a la próxima serenata', 'serenata', '2026-09-19', '2026-09-22'),
+      '',
+    )
+    const pkg = ensureNewTravelSkeleton(
+      {
+        trip: { id: 't5', startDate: '2026-09-19', endDate: '2026-09-22' },
+        travelOptions: [],
+        itineraryItems: [],
+        checklistItems: [],
+        notes: [],
+      },
+      'quiero ir a la próxima serenata',
+    )
+    const item = (pkg.itineraryItems as Rec[]).find((i) =>
+      String(i.externalId).startsWith('goal-'),
+    )!
+    assert.match(String(item.notes), /Fecha objetivo: UNKNOWN/)
+    assert.doesNotMatch(String(item.notes), /20\d{2}-\d{2}-\d{2}/)
+    const chk = (pkg.checklistItems as Rec[]).find((c) =>
+      String(c.externalId).startsWith('chk-goal-'),
+    )!
+    assert.doesNotMatch(String(chk.label), /20\d{2}-\d{2}-\d{2}/)
+  })
+
   it('webResearchWarnings when no webSearch', () => {
     const w = webResearchWarnings([])
     assert.ok(w.some((x) => /no se ejecutó websearch/i.test(x)))

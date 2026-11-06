@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { mergeImportedQuote } from '../../shared/quoteLedger.ts'
 import type pg from 'pg'
 import { isAirportArrivalExternalId } from './airportArrivalEnrich.ts'
 import {
@@ -167,7 +168,7 @@ function buildOptionFromPackage(
   const preserveDecision =
     existing !== undefined && isUserDecisionStatus(existing.status)
 
-  return {
+  return mergeImportedQuote(existing, {
     id,
     tripId,
     type: incoming.type,
@@ -194,7 +195,7 @@ function buildOptionFromPackage(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     syncStatus: 'synced',
-  }
+  })
 }
 
 function extractApplyGate(raw: unknown): {

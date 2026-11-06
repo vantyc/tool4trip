@@ -213,8 +213,8 @@ export const store = {
     return synced
   },
 
-  deleteTrip: async (db: Queryable, id: string) => {
-    return deleteEntity(db, 'trips', id)
+  deleteTrip: async (db: Queryable, id: string, workspace = DEFAULT_WORKSPACE) => {
+    return deleteEntity(db, 'trips', id, workspace)
   },
 
   listBookings: (db: Queryable, tripId: string) =>

@@ -51,6 +51,11 @@ export type BoardItem = {
   countsInBudget: boolean
   /** Ticket that already includes this row's price (return leg). */
   includedWith?: string
+  includedWithId?: string
+  /** Legs priced on this row's ticket (the return of a round trip). */
+  includes?: string[]
+  /** Lodging without dates: local dates the stay falls within. */
+  window?: { from: string; to: string }
   paid?: number
   url?: string
   confirmation?: string
@@ -86,6 +91,8 @@ export type BoardLeg = {
   /** Saved candidates for an undecided leg. */
   routes: BoardRoute[]
   alternatives: BoardItem[]
+  /** Saved transport off the route that starts or ends where this undecided leg does. */
+  related: BoardItem[]
   extras: BoardItem[]
   departAt?: string
   arriveAt?: string
@@ -116,6 +123,10 @@ export type BoardStop = {
   checkIn?: string
   checkOut?: string
   nights?: number
+  /** Stay dates still undecided (no dates, or nights shared with the next stay). */
+  datesPending: boolean
+  /** Dates an undated stay falls within. */
+  window?: { from: string; to: string }
   layoverMinutes?: number
   lodging: BoardItem[]
   lodgingAlternatives: BoardItem[]
@@ -133,23 +144,76 @@ export type BoardAlert = {
   legId?: string
 }
 
+/**
+ * Two consecutive stays whose shared nights can move between them: the
+ * boundary is the first stay's check-out and the second's check-in.
+ */
+export type NightSplit = {
+  id: string
+  firstStopId: string
+  secondStopId: string
+  /** First stay's check-in and second stay's check-out (local dates). */
+  from: string
+  to: string
+  total: number
+  /** Undefined while the split is undecided. */
+  firstNights?: number
+}
+
+/** One priced ticket; a round trip covers its return legs too. */
+export type BoardTicket = {
+  id: string
+  label: string
+  items: BoardItem[]
+  legIds: string[]
+  roundTrip: boolean
+  price?: number
+  currency?: string
+  status: BoardStatus
+  paid?: number
+  checkedAt?: string
+  withBaggage: boolean
+}
+
+export type TaskGroup = 'dates' | 'quote' | 'choose' | 'hotels' | 'book'
+
+export type BoardTask = {
+  id: string
+  group: TaskGroup
+  text: string
+  detail?: string
+  stopId?: string
+  legId?: string
+}
+
 export type BoardSummary = {
   startDate?: string
   endDate?: string
+  /** First departure and last arrival with local time. */
+  startsAt?: string
+  endsAt?: string
+  /** Saved trip end: the latest acceptable return date. */
+  returnLimit?: string
   nights?: number
   currency?: string
   quoted: number
+  quotedTransport: number
+  quotedLodging: number
   paid: number
   toPay: number
-  toQuote: string[]
-  toDecide: string[]
-  toBook: string[]
+  tickets: BoardTicket[]
+  /** What the quoted subtotal still leaves out. */
+  missing: { hotels: number; legs: number; legsAreFlights: boolean }
+  booked: number
+  toBookCount: number
   checklistOpen: number
 }
 
 export type TripBoard = {
   stops: BoardStop[]
   legs: BoardLeg[]
+  splits: NightSplit[]
+  tasks: BoardTask[]
   alerts: BoardAlert[]
   summary: BoardSummary
   /** Saved items that fit no stop or leg (other routes, loose activities). */
@@ -248,6 +312,7 @@ function itemFromOption(
     nextAction: o.nextAction,
     verification: o.verificationStatus,
     checkedAt: o.checkedAt,
+    window: !o.startAt && o.stayWindow ? o.stayWindow : undefined,
   }
 }
 
@@ -333,9 +398,16 @@ function plural(n: number, one: string, many: string): string {
 type StaySlot = {
   key: string
   placeRaw?: string
-  checkIn: string
+  checkIn?: string
   checkOut?: string
+  window?: { from: string; to: string }
   items: BoardItem[]
+}
+
+/** Undated stays sit just before the first event on the last day of their window. */
+function slotTime(slot: StaySlot): number {
+  if (slot.checkIn) return instantMs(slot.checkIn)!
+  return Date.parse(`${slot.window!.to}T00:00:00Z`) - 1
 }
 
 type TimelineEvent =
@@ -374,10 +446,13 @@ export function buildTripBoard(input: {
   const slots = new Map<string, StaySlot>()
   for (const i of items) {
     if (i.kind !== 'lodging' || i.role === 'alternative') continue
-    if (instantMs(i.startAt) === undefined) continue
+    const dated = instantMs(i.startAt) !== undefined
+    if (!dated && !i.window) continue
     const raw = lodgingPlace(i)
     const key = keyOf(raw)
-    const id = `${key}|${localDate(i.startAt)}|${localDate(i.endAt) ?? ''}`
+    const id = dated
+      ? `${key}|${localDate(i.startAt)}|${localDate(i.endAt) ?? ''}`
+      : `${key}|window|${i.window!.from}|${i.window!.to}`
     const slot = slots.get(id)
     if (slot) {
       slot.items.push(i)
@@ -385,8 +460,9 @@ export function buildTripBoard(input: {
       slots.set(id, {
         key,
         placeRaw: raw,
-        checkIn: i.startAt!,
-        checkOut: i.endAt,
+        checkIn: dated ? i.startAt : undefined,
+        checkOut: dated ? i.endAt : undefined,
+        window: dated ? undefined : i.window,
         items: [i],
       })
     }
@@ -400,7 +476,7 @@ export function buildTripBoard(input: {
     })),
     ...[...slots.values()].map((slot) => ({
       t: 'stay' as const,
-      at: instantMs(slot.checkIn)!,
+      at: slotTime(slot),
       slot,
     })),
   ].sort((a, b) => a.at - b.at || (a.t === b.t ? 0 : a.t === 'transport' ? -1 : 1))
@@ -421,6 +497,7 @@ export function buildTripBoard(input: {
       visit: 1,
       visits: 1,
       returnsToStart: false,
+      datesPending: false,
       lodging: [],
       lodgingAlternatives: [],
       extras: [],
@@ -449,6 +526,7 @@ export function buildTripBoard(input: {
       segments,
       routes: [],
       alternatives: [],
+      related: [],
       extras: [],
       dateHint,
       status: 'pending',
@@ -467,7 +545,10 @@ export function buildTripBoard(input: {
         STATUS_RANK[b.status] - STATUS_RANK[a.status],
     )
     stop.lodging.push(...ordered)
-    if (!stop.checkIn || instantMs(slot.checkIn)! < instantMs(stop.checkIn)!) {
+    if (!slot.checkIn) {
+      stop.window = slot.window
+      stop.datesPending = true
+    } else if (!stop.checkIn || instantMs(slot.checkIn)! < instantMs(stop.checkIn)!) {
       stop.checkIn = slot.checkIn
     }
     if (
@@ -502,7 +583,7 @@ export function buildTripBoard(input: {
       const slot = ev.slot
       if (!cur) {
         cur = mkStop(slot.placeRaw, slot.key)
-      } else if (cur.key !== slot.key) {
+      } else if (cur.key !== slot.key || (!slot.checkIn && cur.lodging.length > 0)) {
         const next = mkStop(slot.placeRaw, slot.key)
         mkLeg(cur, next, [], localDate(slot.checkIn))
         cur = next
@@ -627,24 +708,39 @@ export function buildTripBoard(input: {
 
   const unplaced = items.filter((i) => !used.has(i.id))
 
+  for (const leg of legs) {
+    if (leg.segments.length > 0 || leg.routes.length > 0) continue
+    const a = stopById.get(leg.fromStopId)!.key
+    const b = stopById.get(leg.toStopId)!.key
+    leg.related = unplaced.filter(
+      (i) =>
+        isTransport(i) &&
+        i.role !== 'alternative' &&
+        (keyOf(i.origin) === a || keyOf(i.destination) === b),
+    )
+  }
+
   finishLegs(legs, nowMs)
   finishStops(stops, legs, nowMs)
+  const splits = buildSplits(stops, legs)
 
   const alerts = buildAlerts(stops, legs)
   const summary = buildSummary({
     stops,
     legs,
+    items,
     options: liveOptions,
     bookings,
     checklist,
   })
-  if (summary.endDate && trip.endDate && summary.endDate !== trip.endDate) {
+  summary.returnLimit = trip.endDate
+  if (summary.endDate && trip.endDate && summary.endDate > trip.endDate) {
     const last = legs.at(-1)
     if (last?.arriveAt && stops.at(-1)?.kind === 'end') {
       alerts.unshift({
         id: 'trip-end',
         level: 'warn',
-        text: `El viaje guardado termina el ${fmtDay(trip.endDate)}, pero el último tramo llega el ${fmtDay(summary.endDate)}.`,
+        text: `El regreso llega el ${fmtDay(summary.endDate)}, después del límite del viaje (${fmtDay(trip.endDate)}).`,
         legId: last.id,
       })
     }
@@ -661,7 +757,69 @@ export function buildTripBoard(input: {
     }
   }
 
-  return { stops, legs, alerts, summary, unplaced }
+  const tasks = buildTasks(stops, legs, splits, summary.tickets)
+  return { stops, legs, splits, tasks, alerts, summary, unplaced }
+}
+
+/**
+ * Consecutive stays joined by an undecided leg can trade nights. An undated
+ * stay after a dated one shares everything up to the end of its window.
+ */
+function buildSplits(stops: BoardStop[], legs: BoardLeg[]): NightSplit[] {
+  const splits: NightSplit[] = []
+  const pairs: Array<[BoardStop, BoardStop, string]> = []
+  for (let i = 0; i + 1 < stops.length; i++) {
+    const a = stops[i]!
+    const b = stops[i + 1]!
+    if (a.kind !== 'stay' || b.kind !== 'stay') continue
+    if (a.lodging.length === 0 || b.lodging.length === 0 || a.window) continue
+    const leg = legs.find((l) => l.fromStopId === a.id && l.toStopId === b.id)
+    if (!leg || leg.segments.length > 0) continue
+    const from = localDate(a.checkIn)
+    if (from) pairs.push([a, b, from])
+  }
+  // Undated second stays first: they make the first stay's check-out undecided.
+  for (const [a, b, from] of pairs) {
+    if (!b.window || b.checkIn) continue
+    const to = b.window.to
+    const total = daysBetween(from, to)
+    if (total === undefined || total < 2) continue
+    splits.push({ id: `split-${a.id}-${b.id}`, firstStopId: a.id, secondStopId: b.id, from, to, total })
+    a.datesPending = true
+    a.checkOut = undefined
+    a.nights = undefined
+    b.nights = undefined
+    a.pending.unshift(`Repartir ${total} noches con ${b.label}`)
+  }
+  for (const [a, b, from] of pairs) {
+    if (a.datesPending || b.datesPending) continue
+    const aOut = localDate(a.checkOut)
+    const bIn = localDate(b.checkIn)
+    const to = localDate(b.checkOut)
+    if (!aOut || aOut !== bIn || !to) continue
+    const total = daysBetween(from, to)
+    if (total === undefined || total < 2) continue
+    splits.push({
+      id: `split-${a.id}-${b.id}`,
+      firstStopId: a.id,
+      secondStopId: b.id,
+      from,
+      to,
+      total,
+      firstNights: daysBetween(from, aOut),
+    })
+  }
+  splits.sort(
+    (x, y) =>
+      stops.findIndex((s) => s.id === x.firstStopId) -
+      stops.findIndex((s) => s.id === y.firstStopId),
+  )
+  for (const stop of stops) {
+    if (stop.kind === 'stay' && stop.window && !stop.checkIn) {
+      stop.pending.unshift('Definir fechas')
+    }
+  }
+  return splits
 }
 
 /** Return legs priced on the outbound ticket point at that ticket. */
@@ -683,6 +841,10 @@ function markIncludedTickets(items: BoardItem[]): void {
       twin?.flightNumber ??
       twin?.title ??
       item.notes?.match(/mismo boleto que ([A-Z0-9]{2}\s?\d{1,4})/i)?.[1]
+    if (twin) {
+      item.includedWithId = twin.id
+      twin.includes = [...(twin.includes ?? []), item.flightNumber ?? item.title]
+    }
   }
 }
 
@@ -897,16 +1059,6 @@ function buildAlerts(stops: BoardStop[], legs: BoardLeg[]): BoardAlert[] {
     }
   }
 
-  for (const leg of legs) {
-    if (leg.segments.length === 0 && leg.routes.length === 0) {
-      alerts.push({
-        id: `${leg.id}-empty`,
-        level: 'info',
-        text: `No hay opciones guardadas para ${leg.fromLabel} → ${leg.toLabel}.`,
-        legId: leg.id,
-      })
-    }
-  }
   for (let i = 1; i < legs.length; i++) {
     const prevEnd = instantMs(legs[i - 1]!.arriveAt)
     const nextStart = instantMs(legs[i]!.departAt)
@@ -922,14 +1074,23 @@ function buildAlerts(stops: BoardStop[], legs: BoardLeg[]): BoardAlert[] {
   return alerts
 }
 
+function stayWhen(stop: BoardStop): string | undefined {
+  const from = localDate(stop.checkIn)
+  const to = localDate(stop.checkOut)
+  if (from && to) return `${fmtDay(from)}–${fmtDay(to)}`
+  if (stop.window) return `entre ${fmtDay(stop.window.from)} y ${fmtDay(stop.window.to)}`
+  return from ? `desde ${fmtDay(from)}` : undefined
+}
+
 function buildSummary(input: {
   stops: BoardStop[]
   legs: BoardLeg[]
+  items: BoardItem[]
   options: TravelOption[]
   bookings: Booking[]
   checklist: ChecklistItem[]
 }): BoardSummary {
-  const { stops, legs, options, bookings, checklist } = input
+  const { stops, legs, items, options, bookings, checklist } = input
   const days = [
     ...legs.flatMap((l) => [localDate(l.departAt), localDate(l.arriveAt), l.dateHint]),
     ...stops.flatMap((s) => [localDate(s.checkIn), localDate(s.checkOut)]),
@@ -939,63 +1100,191 @@ function buildSummary(input: {
   const endDate = days.at(-1)
   const ledger = quoteLedger(options, bookings)
 
-  const toQuote: string[] = []
-  const toDecide: string[] = []
-  const toBook: string[] = []
+  const tickets: BoardTicket[] = []
+  for (const leg of legs) {
+    for (const s of leg.segments) {
+      if (s.includedWith) continue
+      const covered = items.filter((i) => i.includedWithId === s.id)
+      const all = [s, ...covered]
+      tickets.push({
+        id: s.id,
+        label: all.map((i) => i.flightNumber ?? i.title).join(' + '),
+        items: all,
+        legIds: legs
+          .filter((l) => l.segments.some((x) => all.includes(x)))
+          .map((l) => l.id),
+        roundTrip: covered.length > 0,
+        price: s.price,
+        currency: s.currency,
+        status: s.status,
+        paid: s.paid,
+        checkedAt: s.checkedAt,
+        withBaggage: Boolean(s.baggage),
+      })
+    }
+  }
+
+  const chosenLodging = stops.flatMap((s) => s.lodging.filter((l) => l.role === 'chosen'))
+  const sum = (xs: Array<{ price?: number }>) =>
+    xs.reduce((t, x) => t + (x.price ?? 0), 0)
+  const quotedTransport = sum(tickets)
+  const quotedLodging = sum(chosenLodging.filter((l) => l.countsInBudget))
+
+  const hotelsMissing = stops.filter(
+    (s) =>
+      s.kind === 'stay' &&
+      (s.nights === undefined || s.nights > 0) &&
+      !s.lodging.some((l) => l.role === 'chosen' && l.price !== undefined),
+  ).length
+  const openLegs = legs.filter(
+    (l) =>
+      l.segments.length === 0 ||
+      l.segments.some((x) => x.price === undefined && !x.includedWith),
+  )
+
+  const chosenThings = [...tickets, ...chosenLodging]
+  return {
+    startDate,
+    endDate,
+    startsAt: legs[0]?.departAt,
+    endsAt: legs.at(-1)?.arriveAt,
+    nights: daysBetween(startDate, endDate),
+    currency: ledger.currency,
+    quoted: ledger.subtotal,
+    quotedTransport,
+    quotedLodging,
+    paid: ledger.paid,
+    toPay: ledger.pending,
+    tickets,
+    missing: {
+      hotels: hotelsMissing,
+      legs: openLegs.length,
+      legsAreFlights: openLegs.every((l) => l.mode !== 'ground'),
+    },
+    booked: chosenThings.filter((t) => t.status === 'booked').length,
+    toBookCount: chosenThings.filter((t) => t.status !== 'booked').length,
+    checklistOpen: checklist.filter((c) => c.status === 'open').length,
+  }
+}
+
+/** Concrete next steps, each pointing at the stop or leg that resolves it. */
+function buildTasks(
+  stops: BoardStop[],
+  legs: BoardLeg[],
+  splits: NightSplit[],
+  tickets: BoardTicket[],
+): BoardTask[] {
+  const tasks: BoardTask[] = []
+  const stopById = new Map(stops.map((s) => [s.id, s]))
+
+  for (const split of splits) {
+    if (split.firstNights !== undefined) continue
+    const a = stopById.get(split.firstStopId)!
+    const b = stopById.get(split.secondStopId)!
+    tasks.push({
+      id: `dates-${b.id}`,
+      group: 'dates',
+      text: `Elegir fechas de ${stopTitle(b)}`,
+      detail: `Repartir ${plural(split.total, 'noche', 'noches')} entre ${stopTitle(a)} y ${stopTitle(b)} (${fmtDay(split.from)} – ${fmtDay(split.to)})`,
+      stopId: b.id,
+    })
+  }
+  for (const stop of stops) {
+    if (!stop.window || stop.checkIn) continue
+    if (splits.some((s) => s.secondStopId === stop.id && s.firstNights === undefined)) continue
+    tasks.push({
+      id: `dates-${stop.id}`,
+      group: 'dates',
+      text: `Elegir fechas de ${stopTitle(stop)}`,
+      detail: stayWhen(stop),
+      stopId: stop.id,
+    })
+  }
+
+  for (const leg of legs) {
+    if (leg.segments.length > 0) continue
+    const when = leg.dateHint ? fmtDay(leg.dateHint) : 'fecha por definir'
+    const priced = leg.routes.some((r) => r.price !== undefined)
+    tasks.push({
+      id: `leg-${leg.id}`,
+      group: priced ? 'choose' : 'quote',
+      text: `${leg.fromLabel} → ${leg.toLabel}`,
+      detail:
+        leg.routes.length > 0
+          ? `${when} · ${plural(leg.routes.length, 'ruta guardada', 'rutas guardadas')}${priced ? '' : ', sin precio'}`
+          : leg.related.length > 0
+            ? `${when} · ${plural(leg.related.length, 'opción relacionada', 'opciones relacionadas')} como referencia`
+            : `${when} · sin opciones guardadas`,
+      legId: leg.id,
+    })
+  }
 
   for (const stop of stops) {
     if (stop.kind !== 'stay') continue
-    const when = stop.checkIn
-      ? `${fmtDay(localDate(stop.checkIn))}–${fmtDay(localDate(stop.checkOut))}`
-      : undefined
-    const label = `Hotel en ${stop.label}${when ? ` (${when})` : ''}`
     const chosen = stop.lodging.filter((l) => l.role === 'chosen')
-    if (stop.lodging.length === 0) {
-      toQuote.push(`${label}: sin opciones`)
-    } else if (chosen.length === 0) {
-      if (!stop.lodging.some((l) => l.price !== undefined)) toQuote.push(label)
-      toDecide.push(
-        stop.lodging.length > 1 ? `${label}: ${stop.lodging.length} opciones` : label,
-      )
+    const when = stayWhen(stop)
+    const nights = stop.nights !== undefined ? plural(stop.nights, 'noche', 'noches') : undefined
+    if (chosen.length === 0) {
+      const all = [...stop.lodging, ...stop.lodgingAlternatives]
+      const names = [...new Set(all.map((l) => l.provider).filter(Boolean))]
+      const named = names.length
+      const priced = all.some((l) => l.price !== undefined)
+      tasks.push({
+        id: `hotel-${stop.id}`,
+        group: 'hotels',
+        text: `Hotel en ${stopTitle(stop)}`,
+        detail: [
+          when,
+          nights,
+          named === 1
+            ? `candidato: ${names[0]}`
+            : named > 1
+              ? plural(named, 'hotel candidato', 'hoteles candidatos')
+              : undefined,
+          priced ? undefined : 'sin cotizar',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        stopId: stop.id,
+      })
     } else {
       for (const l of chosen) {
-        if (l.price === undefined) toQuote.push(label)
-        if (l.status !== 'booked') toBook.push(l.provider ?? l.title)
+        if (l.status === 'booked') continue
+        tasks.push({
+          id: `book-${l.id}`,
+          group: 'book',
+          text: `Hotel ${l.provider ?? l.title} (${stopTitle(stop)})`,
+          detail: [
+            when,
+            l.price === undefined
+              ? 'sin precio'
+              : `cotizado en ${l.price.toLocaleString('es-MX')} ${l.currency ?? ''}`.trim(),
+            l.checkedAt ? `consultado ${fmtDay(localDate(l.checkedAt))}` : undefined,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          stopId: stop.id,
+        })
       }
     }
   }
 
-  for (const leg of legs) {
-    const label = `${leg.fromLabel} → ${leg.toLabel}`
-    if (leg.segments.length === 0) {
-      toDecide.push(
-        leg.routes.length > 0
-          ? `${label}: ${plural(leg.routes.length, 'opción', 'opciones')}`
-          : `${label}: sin opciones`,
-      )
-      if (!leg.routes.some((r) => r.price !== undefined)) toQuote.push(label)
-      continue
-    }
-    for (const s of leg.segments) {
-      if (s.includedWith) continue
-      if (s.price === undefined) toQuote.push(s.flightNumber ?? s.title)
-      if (s.status !== 'booked') toBook.push(s.flightNumber ?? s.title)
-    }
+  for (const t of tickets) {
+    if (t.status === 'booked') continue
+    tasks.push({
+      id: `book-${t.id}`,
+      group: 'book',
+      text: `${t.roundTrip ? 'Boleto' : 'Vuelo'} ${t.label}`,
+      detail: [
+        t.price !== undefined ? `cotizado en ${t.price.toLocaleString('es-MX')} ${t.currency ?? ''}`.trim() : 'sin precio',
+        t.checkedAt ? `consultado ${fmtDay(localDate(t.checkedAt))}` : undefined,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      legId: t.legIds[0],
+    })
   }
-
-  return {
-    startDate,
-    endDate,
-    nights: daysBetween(startDate, endDate),
-    currency: ledger.currency,
-    quoted: ledger.subtotal,
-    paid: ledger.paid,
-    toPay: ledger.pending,
-    toQuote,
-    toDecide,
-    toBook,
-    checklistOpen: checklist.filter((c) => c.status === 'open').length,
-  }
+  return tasks
 }
 
 export function stopTitle(stop: BoardStop): string {

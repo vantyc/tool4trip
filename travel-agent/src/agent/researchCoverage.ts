@@ -13,9 +13,16 @@ export type ResearchGoalKind =
   | 'lodging_destination'
   | 'event_activities'
   | 'ground_leg'
+  | 'event_discovery'
+  | 'destination_selection'
+  | 'public_safety'
   | 'other'
 
-export type GoalStatus = 'RESOLVED' | 'PARTIAL' | 'UNRESOLVED'
+/**
+ * UNSUPPORTED is internal (no available tool can address the goal); the public
+ * researchDiagnostics contract only knows RESOLVED | PARTIAL | UNRESOLVED.
+ */
+export type GoalStatus = 'RESOLVED' | 'PARTIAL' | 'UNRESOLVED' | 'UNSUPPORTED'
 
 /** Investigation priority: critical blocks secondary until a reasonable attempt finishes. */
 export type GoalTier = 'critical' | 'supporting' | 'secondary'
@@ -28,6 +35,20 @@ export type ResearchGoal = {
   tier: GoalTier
   status: GoalStatus
   evidenceNote?: string
+  /** Internal: goal determines destination/dates; unresolved ⇒ no package. */
+  decisionCritical?: boolean
+  /** Internal: goal ids whose evidence this goal builds on. */
+  dependsOn?: string[]
+}
+
+export type PublicResearchGoal = {
+  id: string
+  kind: string
+  label: string
+  important: boolean
+  status: 'RESOLVED' | 'PARTIAL' | 'UNRESOLVED'
+  evidenceNote?: string
+  tier?: GoalTier
 }
 
 export type CandidateRejectReason =
@@ -43,6 +64,7 @@ export type CandidateRejectReason =
   | 'fetch_failed'
   | 'accepted_anchor'
   | 'accepted_partial'
+  | 'grounded_claim'
 
 export type CandidateDecision = {
   url: string
@@ -54,7 +76,7 @@ export type CandidateDecision = {
 }
 
 export type ResearchDiagnostics = {
-  goals: ResearchGoal[]
+  goals: PublicResearchGoal[]
   candidates: CandidateDecision[]
   toolRounds: number
   toolCallsUsed: number
@@ -131,12 +153,7 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
       p,
     ) || /\b20:00\b/.test(prompt)
 
-  const destTown =
-    /san miguel el alto/.test(p)
-      ? 'San Miguel el Alto'
-      : /destino|pueblo|hospedaje en/.test(p)
-        ? 'destino'
-        : null
+  const wantsDestinationStay = /destino|pueblo|hospedaje en/.test(p)
 
   if (wantsFlight) {
     goals.push({
@@ -190,13 +207,11 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
       status: 'UNRESOLVED',
     })
   }
-  if (wantsHotel || destTown) {
+  if (wantsHotel || wantsDestinationStay) {
     goals.push({
       id: 'goal-lodging-dest',
       kind: 'lodging_destination',
-      label: destTown
-        ? `Hospedaje en ${destTown}`
-        : 'Hospedaje en destino',
+      label: 'Hospedaje en destino',
       important: true,
       tier: 'secondary',
       status: 'UNRESOLVED',
@@ -207,8 +222,8 @@ export function deriveResearchGoals(prompt: string): ResearchGoal[] {
       id: 'goal-event',
       kind: 'event_activities',
       label: dates.length
-        ? `Serenata/actividades (${dates.join(', ')})`
-        : 'Serenata/actividades del destino',
+        ? `Evento/actividades (${dates.join(', ')})`
+        : 'Evento/actividades del destino',
       important: true,
       tier: 'secondary',
       status: 'UNRESOLVED',
@@ -259,12 +274,15 @@ function listTraceSources(toolTrace: ToolTraceEntry[]): Array<{
     tool: string
     ok: boolean
   }> = []
+  const origins = originQueryByUrl(toolTrace)
   for (const t of toolTrace) {
+    // fetchUrl is attributed to the search that surfaced the URL, not to
+    // keywords in the URL itself (one page must not cover unrelated goals).
     const query =
       typeof t.args?.query === 'string'
         ? t.args.query
-        : typeof t.args?.url === 'string'
-          ? String(t.args.url)
+        : t.tool === 'fetchUrl' && typeof t.args?.url === 'string'
+          ? origins.get(String(t.args.url))
           : undefined
     for (const s of t.sources ?? []) {
       if (!s.url) continue
@@ -284,7 +302,7 @@ function listTraceSources(toolTrace: ToolTraceEntry[]): Array<{
           url: String(t.args.url),
           title: '',
           snippet: t.ok ? 'fetchUrl ok' : t.error ?? 'fetch failed',
-          query: String(t.args.url),
+          query: origins.get(String(t.args.url)),
           tool: 'fetchUrl',
           ok: t.ok,
         })
@@ -292,6 +310,40 @@ function listTraceSources(toolTrace: ToolTraceEntry[]): Array<{
     }
   }
   return out
+}
+
+/** URL → query of the first non-fetch tool call whose sources surfaced it. */
+export function originQueryByUrl(
+  toolTrace: ToolTraceEntry[],
+): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const t of toolTrace) {
+    if (t.tool === 'fetchUrl') continue
+    const q =
+      typeof t.args?.query === 'string'
+        ? t.args.query
+        : t.tool === 'searchFlightSchedules'
+          ? `vuelo ${String(t.args?.origin ?? '')} ${String(t.args?.destination ?? '')} ${String(t.args?.date ?? '')}`.trim()
+          : undefined
+    if (!q) continue
+    for (const s of t.sources ?? []) {
+      if (s.url && !map.has(s.url)) map.set(s.url, q)
+    }
+  }
+  return map
+}
+
+/**
+ * Provenance links of published schedules (searchFlightSchedules sources):
+ * valid flight sourceUrls, never pages worth verifying with fetchUrl.
+ */
+export function scheduleProvenanceUrls(toolTrace: ToolTraceEntry[]): Set<string> {
+  const urls = new Set<string>()
+  for (const t of toolTrace) {
+    if (t.tool !== 'searchFlightSchedules') continue
+    for (const s of t.sources ?? []) if (s.url) urls.add(s.url)
+  }
+  return urls
 }
 
 export function consultedSourceCount(toolTrace: ToolTraceEntry[]): number {
@@ -458,7 +510,10 @@ function goalMatchesSource(
   goal: ResearchGoal,
   src: { url: string; title: string; snippet: string; query?: string },
 ): boolean {
-  const blob = norm(`${src.url} ${src.title} ${src.snippet} ${src.query ?? ''}`)
+  // With an originating query, URL slugs are not attribution evidence.
+  const blob = src.query
+    ? norm(`${src.title} ${src.snippet} ${src.query}`)
+    : norm(`${src.url} ${src.title} ${src.snippet}`)
   switch (goal.kind) {
     case 'flight_day_specific':
       return /vuelo|flight|aeromexico|volaris|viva|aicm|\bmex\b|\bgdl\b/.test(
@@ -475,9 +530,18 @@ function goalMatchesSource(
     case 'lodging_contingency':
       return /hotel|hospedaje|central|terminal|guadalajara/.test(blob)
     case 'lodging_destination':
-      return /hotel|hospedaje|airbnb|san miguel/.test(blob)
+      return /hotel|hospedaje|airbnb|posada|alojamiento|hostal/.test(blob)
     case 'event_activities':
-      return /feria|serenata|fiesta|evento|cartelera|palenque/.test(blob)
+    case 'event_discovery':
+      return /feria|serenata|fiesta|evento|cartelera|palenque|festival|concierto/.test(
+        blob,
+      )
+    case 'public_safety':
+      return /seguridad|insegur|delictiv|delito|crimen|criminalidad|violencia|homicidio|alerta de viaje|travel advisory/.test(
+        blob,
+      )
+    case 'destination_selection':
+      return false
     case 'ground_leg':
       return /autobus|autobús|bus|corrida|ruta/.test(blob)
     default:
@@ -600,10 +664,10 @@ export function classifyCandidates(
       continue
     }
 
-    // Named lodging / event pages without schedule/price → partial candidate
-    const namedHotel =
-      /hotel|posada|hospedaje/.test(norm(src.title + src.snippet)) &&
-      /san miguel|guadalajara|central/.test(norm(src.title + src.url))
+    // Lodging listing / event pages without schedule/price → partial candidate
+    const namedHotel = /\b(hotel|posada|hostal|hospedaje)\b/.test(
+      norm(src.title),
+    )
     const namedEvent =
       /feria|serenata|fiesta 2026|cartelera/.test(norm(src.title + src.snippet))
 
@@ -674,6 +738,7 @@ function hasFetchForGoals(
   toolTrace: ToolTraceEntry[],
   goals: ResearchGoal[],
 ): boolean {
+  const origins = originQueryByUrl(toolTrace)
   return toolTrace.some(
     (t) =>
       t.tool === 'fetchUrl' &&
@@ -683,7 +748,7 @@ function hasFetchForGoals(
           url: String(t.args?.url ?? ''),
           title: '',
           snippet: '',
-          query: String(t.args?.url ?? ''),
+          query: origins.get(String(t.args?.url ?? '')),
         }),
       ),
   )
@@ -737,12 +802,16 @@ export function optionAnchorsGoal(
       case 'lodging_contingency':
         return type === 'lodging' && /guadalajara|terminal|contingencia/.test(blob)
       case 'lodging_destination':
-        return type === 'lodging' && /san miguel|destino|alto/.test(blob)
+        return type === 'lodging' && !/contingencia/.test(blob)
       case 'event_activities':
+      case 'event_discovery':
         return (
           ['activity', 'event'].includes(type) ||
-          /serenata|feria|fiesta/.test(blob)
+          /serenata|feria|fiesta|festival|concierto/.test(blob)
         )
+      case 'public_safety':
+      case 'destination_selection':
+        return false
       default:
         return Boolean(url)
     }
@@ -772,6 +841,47 @@ export function optionAnchorsGoal(
  * Snippet-only hits ⇒ at best PARTIAL; verified requires anchored sourceUrl.
  */
 export function assessResearchGoals(
+  goals: ResearchGoal[],
+  toolTrace: ToolTraceEntry[],
+  opts?: {
+    package?: unknown
+    tripDates?: string[]
+    /** Registered tool names; goals no tool can serve become UNSUPPORTED. */
+    availableTools?: string[]
+  },
+): ResearchGoal[] {
+  const assessed = assessResearchGoalsFromEvidence(goals, toolTrace, opts)
+  return opts?.availableTools
+    ? markUnsupportedGoals(assessed, opts.availableTools)
+    : assessed
+}
+
+const WEB_TOOLS = ['webSearch', 'fetchUrl']
+
+function toolsServingGoal(kind: ResearchGoalKind): string[] {
+  if (kind === 'flight_day_specific') {
+    return ['searchFlightSchedules', ...WEB_TOOLS]
+  }
+  return WEB_TOOLS
+}
+
+export function markUnsupportedGoals(
+  goals: ResearchGoal[],
+  availableTools: string[],
+): ResearchGoal[] {
+  const available = new Set(availableTools)
+  return goals.map((g) => {
+    if (g.status === 'RESOLVED') return g
+    if (toolsServingGoal(g.kind).some((t) => available.has(t))) return g
+    return {
+      ...g,
+      status: 'UNSUPPORTED' as const,
+      evidenceNote: 'no available tool can research this requirement',
+    }
+  })
+}
+
+function assessResearchGoalsFromEvidence(
   goals: ResearchGoal[],
   toolTrace: ToolTraceEntry[],
   opts?: {
@@ -1004,7 +1114,7 @@ export function needsFlightDirectedRetry(input: {
   toolTrace: ToolTraceEntry[]
   tripDates: string[]
 }): boolean {
-  const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
+  const flight = criticalFlightGoal(input.goals)
   if (!flight) return false
   if (flight.status === 'RESOLVED') return false
   // Prefer searchFlightSchedules before any web directed retry
@@ -1052,7 +1162,7 @@ export function flightCriticalAttemptExhausted(input: {
   toolTrace: ToolTraceEntry[]
   tripDates: string[]
 }): boolean {
-  const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
+  const flight = criticalFlightGoal(input.goals)
   if (!flight) return true
   if (flight.status === 'RESOLVED' || flight.status === 'PARTIAL') return true
   // One schedule-provider attempt (ok or empty/error) unlocks web fallback / secondary
@@ -1094,10 +1204,17 @@ export function shouldDeferSecondaryResearch(input: {
   toolTrace: ToolTraceEntry[]
   tripDates: string[]
 }): boolean {
-  const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
+  const flight = criticalFlightGoal(input.goals)
   if (!flight) return false
   if (flight.status === 'RESOLVED') return false
   return !flightCriticalAttemptExhausted(input)
+}
+
+/** Flight-first gating only applies when the flight goal is the critical one. */
+function criticalFlightGoal(goals: ResearchGoal[]): ResearchGoal | undefined {
+  return goals.find(
+    (g) => g.kind === 'flight_day_specific' && g.tier === 'critical',
+  )
 }
 
 /** Whether a pending tool call should be skipped to protect critical flight budget. */
@@ -1110,7 +1227,7 @@ export function shouldSkipToolCallForFlightPriority(input: {
 }): boolean {
   if (input.toolName === 'searchFlightSchedules') return false
 
-  const flight = input.goals.find((g) => g.kind === 'flight_day_specific')
+  const flight = criticalFlightGoal(input.goals)
   if (
     flight &&
     flight.status !== 'RESOLVED' &&
@@ -1223,11 +1340,12 @@ export function buildDirectedResearchNudge(input: {
   const open = input.goals.filter(
     (g) => g.status === 'UNRESOLVED' || g.status === 'PARTIAL',
   )
+  const provenance = scheduleProvenanceUrls(input.toolTrace)
   const candidates = classifyCandidates(
     input.toolTrace,
     input.goals,
     input.tripDates,
-  ).filter((c) => c.decision === 'accepted')
+  ).filter((c) => c.decision === 'accepted' && !provenance.has(c.url))
 
   if (flightRetry) {
     const suggested = buildDirectedFlightRetryQueries({
@@ -1416,11 +1534,19 @@ export function buildResearchDiagnostics(input: {
   forcedExtraRounds: number
   package?: unknown
   tripDates?: string[]
+  /** Goals already assessed by the caller (e.g. research planner); skips re-assessment. */
+  assessedGoals?: ResearchGoal[]
+  availableTools?: string[]
+  /** https sourceUrls of grounded web claims (findings), anchored to an entity or not. */
+  groundedSourceUrls?: string[]
 }): ResearchDiagnostics {
-  const goals = assessResearchGoals(input.goals, input.toolTrace, {
-    package: input.package,
-    tripDates: input.tripDates,
-  })
+  const goals =
+    input.assessedGoals ??
+    assessResearchGoals(input.goals, input.toolTrace, {
+      package: input.package,
+      tripDates: input.tripDates,
+      availableTools: input.availableTools,
+    })
   const candidates = classifyCandidates(
     input.toolTrace,
     goals,
@@ -1436,7 +1562,16 @@ export function buildResearchDiagnostics(input: {
       if (typeof o.sourceUrl === 'string') anchored.add(o.sourceUrl)
     }
   }
+  const grounded = new Set(input.groundedSourceUrls ?? [])
   const candidatesFinal = candidates.map((c) => {
+    if (grounded.has(c.url) && c.reason !== 'duplicate' && !anchored.has(c.url)) {
+      return {
+        ...c,
+        decision: 'accepted' as const,
+        reason: 'grounded_claim' as const,
+        note: 'cited by a grounded claim; not anchored to a package entity',
+      }
+    }
     if (anchored.has(c.url) && c.decision === 'accepted') {
       return {
         ...c,
@@ -1461,7 +1596,7 @@ export function buildResearchDiagnostics(input: {
   })
 
   return {
-    goals,
+    goals: goals.map(toPublicResearchGoal),
     candidates: candidatesFinal,
     toolRounds: input.toolRounds,
     toolCallsUsed: input.toolCallsUsed,
@@ -1469,6 +1604,24 @@ export function buildResearchDiagnostics(input: {
     forcedExtraRounds: input.forcedExtraRounds,
     consultedSourceCount: consultedSourceCount(input.toolTrace),
     anchoredSourceCount: anchoredSourceCount(input.package),
+  }
+}
+
+/** Strip internal fields and map UNSUPPORTED onto the public status set. */
+export function toPublicResearchGoal(g: ResearchGoal): PublicResearchGoal {
+  const status = g.status === 'UNSUPPORTED' ? 'UNRESOLVED' : g.status
+  const note =
+    g.status === 'UNSUPPORTED'
+      ? `unsupported: ${g.evidenceNote ?? 'no available tool can research this requirement'}`
+      : g.evidenceNote
+  return {
+    id: g.id,
+    kind: g.kind,
+    label: g.label,
+    important: g.important,
+    status,
+    ...(note ? { evidenceNote: note.slice(0, 500) } : {}),
+    tier: g.tier,
   }
 }
 

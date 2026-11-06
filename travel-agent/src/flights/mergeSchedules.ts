@@ -120,14 +120,37 @@ export function optionMatchesPublishedSchedule(
   const originBlob = str(opt.origin).toUpperCase()
   const destBlob = str(opt.destination).toUpperCase()
 
-  for (const s of schedules) {
-    if (scheduleClockKey(s.departureAt) !== startKey) continue
-    if (!originBlob.includes(s.origin) || !destBlob.includes(s.destination)) {
-      continue
-    }
-    return s
-  }
-  return null
+  const hits = schedules.filter(
+    (s) =>
+      scheduleClockKey(s.departureAt) === startKey &&
+      originBlob.includes(s.origin) &&
+      destBlob.includes(s.destination),
+  )
+  const designator = optionFlightDesignator(opt)
+  return (
+    (designator && hits.find((s) => normFlight(s.flightNumber) === designator)) ||
+    hits[0] ||
+    null
+  )
+}
+
+function normFlight(v: string | null | undefined): string {
+  return (v ?? '').toUpperCase().replace(/\s+/g, '')
+}
+
+/** Flight designator the option already names (sourceUrl `flight=` or title). */
+function optionFlightDesignator(opt: Rec): string | undefined {
+  const fromUrl = str(opt.sourceUrl).match(/[?&]flight=([A-Za-z0-9]+)/)?.[1]
+  if (fromUrl) return normFlight(fromUrl)
+  const m = str(opt.title).match(/\b([A-Z][A-Z0-9]|[0-9][A-Z])\s?(\d{1,4})\b/)
+  return m ? `${m[1]}${m[2]}` : undefined
+}
+
+/** Schedule URL of the same flight on another day: provenance of a different flight instance. */
+function isOtherDaySchedule(sourceUrl: string, match: TraceSchedule, designator?: string): boolean {
+  const day = sourceUrl.match(/[?&]date=(\d{4}-\d{2}-\d{2})/)?.[1]
+  if (!day || day === match.departureAt.slice(0, 10)) return false
+  return !designator || designator === normFlight(match.flightNumber)
 }
 
 /**
@@ -153,6 +176,7 @@ export function stampProvenScheduleOptions(
     const notes = [str(o.notes), PUBLISHED_SCHEDULE_NOTE]
       .filter(Boolean)
       .join(' ')
+    const stale = isOtherDaySchedule(str(o.sourceUrl), match, optionFlightDesignator(o))
     return {
       ...o,
       sourceType: 'flight_schedule',
@@ -160,8 +184,8 @@ export function stampProvenScheduleOptions(
         str(o.verificationStatus) === 'verified'
           ? 'estimated'
           : str(o.verificationStatus) || 'estimated',
-      sourceUrl: str(o.sourceUrl) || match.sourceUrl,
-      checkedAt: str(o.checkedAt) || match.checkedAt,
+      sourceUrl: stale ? match.sourceUrl : str(o.sourceUrl) || match.sourceUrl,
+      checkedAt: stale ? match.checkedAt : str(o.checkedAt) || match.checkedAt,
       provider:
         str(o.provider) || match.carrierName || match.carrierCode || undefined,
       endAt: str(o.endAt) || match.arrivalAt || undefined,
