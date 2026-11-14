@@ -462,7 +462,7 @@ export function filipinasNov2026Bundle(): {
     ],
     status: 'planned',
     notes:
-      'Opción provisional: dos boletos United por San Francisco. Salida de CDMX el 14 nov 2026 y regreso el 28 a las 19:35. Subtotal 31,628 MXN con una maleta de 23 kg en el tramo corto. El boleto único de 40,886 MXN queda como alternativa. Cotizado el 3 nov 2026 en Skyscanner México. Airbnb Kanso Makati confirmado 17–19 (cambio de fecha autorizado 14 nov). El Nido y traslados internos replanificados al 19. Cuenta United: correo primario verificado ' +
+      'United HNW4J6 comprado: ida 16 nov UA822 MEX→SFO y UA809 SFO→MNL, llegada Manila 17 nov 21:10. Regreso ~28 nov (confirmar en reserva). Airbnb Kanso Makati 17–19. Cebú desde el 19; El Nido desde el 22. Perfil United: correo primario verificado ' +
       UNITED_PRIMARY_EMAIL +
       '. Las búsquedas nuevas de este viaje se guardan en este mismo registro.',
     createdAt: CHECKED,
@@ -485,9 +485,31 @@ export function filipinasNov2026Bundle(): {
     {
       id: 'filipinas-nov-2026-ck-united-email',
       tripId: FILIPINAS_TRIP_ID,
-      label: `United: correo primario verificado (${UNITED_PRIMARY_EMAIL}). Confirmaciones de boleto irán ahí.`,
+      label: `United: correo primario verificado (${UNITED_PRIMARY_EMAIL}).`,
       status: 'done',
       sortOrder: 1,
+      createdAt: UNITED_EMAIL_CHANGE,
+      updatedAt: UNITED_EMAIL_CHANGE,
+      syncStatus: 'synced',
+    },
+    {
+      id: 'filipinas-nov-2026-ck-united-eticket',
+      tripId: FILIPINAS_TRIP_ID,
+      label:
+        'United HNW4J6: reenviar eTicket/itinerario a Gmail; confirmar regreso 28 y asiento US$59.99.',
+      status: 'open',
+      sortOrder: 2,
+      createdAt: UNITED_EMAIL_CHANGE,
+      updatedAt: UNITED_EMAIL_CHANGE,
+      syncStatus: 'synced',
+    },
+    {
+      id: 'filipinas-nov-2026-ck-etravel',
+      tripId: FILIPINAS_TRIP_ID,
+      label:
+        'Actualizar eTravel a llegada Manila 17 nov 21:10 UA809 (el registro actual dice 15 nov).',
+      status: 'open',
+      sortOrder: 3,
       createdAt: UNITED_EMAIL_CHANGE,
       updatedAt: UNITED_EMAIL_CHANGE,
       syncStatus: 'synced',
@@ -496,22 +518,33 @@ export function filipinasNov2026Bundle(): {
       id: 'filipinas-nov-2026-ck-eni-shift',
       tripId: FILIPINAS_TRIP_ID,
       label:
-        'Replanificar El Nido y vuelos internos al 19 nov (Airbnb Makati 17–19 autorizado). Cotizar hotel 19–27 y MNL/CRK→ENI del 19.',
+        'Itinerario interno: Cebú desde el 19; El Nido desde el 22 (ya no «ENI el 19»). Verificar hospedaje Cebú/El Nido en Tool4Trip cuando se editen opciones.',
       status: 'open',
-      sortOrder: 2,
+      sortOrder: 4,
       createdAt: KANSO_CHANGE,
-      updatedAt: KANSO_CHANGE,
+      updatedAt: UNITED_EMAIL_CHANGE,
       syncStatus: 'synced',
     },
     {
-      id: 'filipinas-nov-2026-ck-gap-15',
+      id: 'filipinas-nov-2026-ck-airbnb-refund',
       tripId: FILIPINAS_TRIP_ID,
       label:
-        'Si UA809 sigue llegando el 15: cubrir noches 15–16 en Manila (Kanso empieza el 17) o confirmar el nuevo arribo.',
+        'Verificar reembolso Airbnb Kanso US$53.76 en VISA •4146 (modificación 15–19 → 17–19).',
       status: 'open',
-      sortOrder: 3,
-      createdAt: KANSO_CHANGE,
-      updatedAt: KANSO_CHANGE,
+      sortOrder: 5,
+      createdAt: UNITED_EMAIL_CHANGE,
+      updatedAt: UNITED_EMAIL_CHANGE,
+      syncStatus: 'synced',
+    },
+    {
+      id: 'filipinas-nov-2026-ck-insurance',
+      tripId: FILIPINAS_TRIP_ID,
+      label:
+        'Abrir voucher Intermundial TL-23267 y confirmar vigencia vs fechas del viaje.',
+      status: 'open',
+      sortOrder: 6,
+      createdAt: UNITED_EMAIL_CHANGE,
+      updatedAt: UNITED_EMAIL_CHANGE,
       syncStatus: 'synced',
     },
   ]
@@ -521,16 +554,16 @@ export function filipinasNov2026Bundle(): {
       id: 'filipinas-nov-2026-nota',
       tripId: FILIPINAS_TRIP_ID,
       title: 'Itinerario elegido',
-      body: '14 nov 05:45 UA822 MEX→SFO 08:44. 14:05 UA809 SFO→MNL 21:10 del 15. Airbnb Kanso Makati 17–19 (cambio autorizado 14 nov por Abyzz/Gavt; check-in ~23:00 ok). El Nido 19–27, Manila 27–28. 28 nov 09:55 UA190 MNL→SFO 06:35 y 13:14 UA817 SFO→MEX 19:35. Dos boletos, sin protección entre sí. Internos y El Nido aún sin reservar.',
+      body: 'Ida United HNW4J6: 16 nov UA822 MEX→SFO; UA809 SFO→MNL, llegada Manila 17 nov 21:10. Airbnb Kanso Makati 17–19 (check-in ~23:00 ok). Cebú desde el 19. El Nido desde el 22. Regreso United ~28 nov (confirmar tramos en la reserva).',
       createdAt: CHECKED,
-      updatedAt: KANSO_CHANGE,
+      updatedAt: UNITED_EMAIL_CHANGE,
       syncStatus: 'synced',
     },
     {
       id: 'filipinas-nov-2026-nota-united',
       tripId: FILIPINAS_TRIP_ID,
       title: 'Cuenta United',
-      body: `Correo primario verificado el 14 nov 2026: ${UNITED_PRIMARY_EMAIL}. Secundario en perfil: vantyc@hotmail.com. Listo para recibir confirmaciones al comprar UA822/UA809 (y regreso).`,
+      body: `Boleto HNW4J6 ya comprado. Correo primario del perfil verificado el 14 nov 2026: ${UNITED_PRIMARY_EMAIL}. Secundario: vantyc@hotmail.com. El eTicket aún no aparece en Gmail; reenviar itinerario a esta cuenta.`,
       createdAt: UNITED_EMAIL_CHANGE,
       updatedAt: UNITED_EMAIL_CHANGE,
       syncStatus: 'synced',
@@ -545,7 +578,7 @@ export function filipinasNov2026Bundle(): {
       importedAt: CHECKED,
       optionCount: travelOptions.length,
       schemaVersion: 1,
-      revision: 3,
+      revision: 4,
       generatedAt: UNITED_EMAIL_CHANGE,
     },
   ]
