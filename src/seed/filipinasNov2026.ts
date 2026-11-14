@@ -540,9 +540,20 @@ export function filipinasNov2026Bundle(): {
       id: 'filipinas-nov-2026-ck-insurance',
       tripId: FILIPINAS_TRIP_ID,
       label:
-        'Abrir voucher Intermundial TL-23267 y confirmar vigencia vs fechas del viaje.',
-      status: 'open',
+        'Intermundial TL-23267 Medium: vigencia 14–28 nov 2026 (PH + EE. UU.), 1 659,84 MXN — voucher descargado/OK.',
+      status: 'done',
       sortOrder: 6,
+      createdAt: UNITED_EMAIL_CHANGE,
+      updatedAt: UNITED_EMAIL_CHANGE,
+      syncStatus: 'synced',
+    },
+    {
+      id: 'filipinas-nov-2026-ck-airbnb-cebu',
+      tripId: FILIPINAS_TRIP_ID,
+      label:
+        'Airbnb Cebú Sleek Studio 19–22 nov: anotar código de confirmación y monto (recibo en Gmail).',
+      status: 'open',
+      sortOrder: 7,
       createdAt: UNITED_EMAIL_CHANGE,
       updatedAt: UNITED_EMAIL_CHANGE,
       syncStatus: 'synced',
