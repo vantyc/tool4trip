@@ -507,8 +507,8 @@ export function filipinasNov2026Bundle(): {
       id: 'filipinas-nov-2026-ck-etravel',
       tripId: FILIPINAS_TRIP_ID,
       label:
-        'Actualizar eTravel a llegada Manila 17 nov 21:10 UA809 (el registro actual dice 15 nov).',
-      status: 'open',
+        'eTravel F00NKZMH64BZ: llegada 17 nov 2026 UA809 MNL T3 (válido hasta 18 nov).',
+      status: 'done',
       sortOrder: 3,
       createdAt: UNITED_EMAIL_CHANGE,
       updatedAt: UNITED_EMAIL_CHANGE,
