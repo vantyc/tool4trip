@@ -32,7 +32,13 @@ describe('checkBudget', () => {
     assert.deepEqual(check.projected, [])
     assert.deepEqual(
       check.unpriced.map((l) => l.text),
-      ['Hotel en Manila · 1ª vez', 'Hotel en El Nido', 'Hotel en Manila · 2ª vez', 'Manila → El Nido', 'El Nido → Manila'],
+      [
+        'Hotel Airbnb — Abyzz y Gavt (Manila · 1ª vez)',
+        'Hotel en El Nido',
+        'Hotel en Manila · 2ª vez',
+        'Manila → El Nido',
+        'El Nido → Manila',
+      ],
     )
   })
 

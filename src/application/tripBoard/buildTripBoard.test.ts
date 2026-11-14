@@ -76,9 +76,9 @@ describe('buildTripBoard — Filipinas guardado', () => {
     assert.equal(stopTitle(board.stops.at(-1)!), 'Ciudad de México · regreso')
   })
 
-  it('El Nido tiene 10 noches y su hotel pendiente', () => {
+  it('El Nido tiene 8 noches y su hotel pendiente', () => {
     const eni = board.stops[3]!
-    assert.equal(eni.nights, 10)
+    assert.equal(eni.nights, 8)
     assert.equal(eni.lodging[0]!.provider, 'Huni Lio')
     assert.equal(eni.status, 'pending')
     assert.ok(eni.pending.includes('Elegir cómo llegar'))
@@ -87,7 +87,7 @@ describe('buildTripBoard — Filipinas guardado', () => {
   it('los traslados a El Nido quedan por elegir con sus dos rutas', () => {
     const toEni = board.legs[2]!
     assert.equal(toEni.segments.length, 0)
-    assert.equal(toEni.dateHint, '2026-11-17')
+    assert.equal(toEni.dateHint, '2026-11-19')
     assert.equal(toEni.mode, 'mixed')
     assert.deepEqual(
       toEni.routes.map((r) => r.items.map((i) => `${i.origin}-${i.destination}`)),
@@ -163,20 +163,24 @@ describe('buildTripBoard — Filipinas guardado', () => {
       [
         'quote: Manila → El Nido',
         'quote: El Nido → Manila',
-        'hotels: Hotel en Manila · 1ª vez',
         'hotels: Hotel en El Nido',
         'hotels: Hotel en Manila · 2ª vez',
         'book: Boleto UA822 + UA817',
         'book: Boleto UA809 + UA190',
       ],
     )
-    assert.equal(board.tasks[0]!.detail, '17 nov · 2 rutas guardadas, sin precio')
+    assert.equal(board.tasks[0]!.detail, '19 nov · 2 rutas guardadas, sin precio')
     assert.match(board.tasks.at(-1)!.detail!, /18,523 MXN · consultado 3 nov/)
   })
 
   it('el 29 es el límite de regreso: llegar el 28 no es un aviso', () => {
     assert.equal(board.summary.returnLimit, '2026-11-29')
-    assert.deepEqual(board.alerts, [])
+    assert.deepEqual(
+      board.alerts.map((a) => a.text),
+      [
+        'Noche sin hotel en Manila (1ª vez): llegas el 15 nov y el hotel empieza el 17 nov.',
+      ],
+    )
   })
 
   it('avisa si el regreso pasa del límite', () => {
@@ -187,7 +191,10 @@ describe('buildTripBoard — Filipinas guardado', () => {
     })
     assert.deepEqual(
       late.alerts.map((a) => a.text),
-      ['El regreso llega el 28 nov, después del límite del viaje (27 nov).'],
+      [
+        'El regreso llega el 28 nov, después del límite del viaje (27 nov).',
+        'Noche sin hotel en Manila (1ª vez): llegas el 15 nov y el hotel empieza el 17 nov.',
+      ],
     )
   })
 
@@ -195,8 +202,8 @@ describe('buildTripBoard — Filipinas guardado', () => {
     assert.deepEqual(
       board.splits.map((s) => [s.from, s.to, s.total, s.firstNights]),
       [
-        ['2026-11-15', '2026-11-27', 12, 2],
-        ['2026-11-17', '2026-11-28', 11, 10],
+        ['2026-11-17', '2026-11-27', 10, 2],
+        ['2026-11-19', '2026-11-28', 9, 8],
       ],
     )
   })
@@ -267,7 +274,8 @@ describe('buildTripBoard — cambios', () => {
     assert.equal(seg.confirmation, 'ABC123')
     assert.equal(board.legs[0]!.status, 'booked')
     assert.equal(board.summary.paid, 13105)
-    assert.equal(board.summary.booked, 1)
+    // UA822 booking + already-booked Airbnb Kanso
+    assert.equal(board.summary.booked, 2)
     assert.deepEqual(
       board.tasks.filter((t) => t.group === 'book').map((t) => t.text),
       ['Boleto UA809 + UA190'],
@@ -280,7 +288,7 @@ describe('buildTripBoard — cambios', () => {
         id: 'ceb',
         title: 'Pendiente — hotel en Cebú, fechas por definir',
         destination: 'Cebú',
-        stayWindow: { from: '2026-11-17', to: '2026-11-27' },
+        stayWindow: { from: '2026-11-19', to: '2026-11-27' },
       }),
     ])
     assert.deepEqual(
@@ -301,10 +309,10 @@ describe('buildTripBoard — cambios', () => {
     assert.equal(eni.checkOut, undefined)
     assert.equal(eni.nights, undefined)
     assert.equal(ceb.datesPending, true)
-    assert.deepEqual(ceb.window, { from: '2026-11-17', to: '2026-11-27' })
+    assert.deepEqual(ceb.window, { from: '2026-11-19', to: '2026-11-27' })
     assert.deepEqual(
       board.splits.map((s) => [s.firstStopId, s.secondStopId, s.total, s.firstNights]),
-      [[eni.id, ceb.id, 10, undefined]],
+      [[eni.id, ceb.id, 8, undefined]],
     )
     const toCeb = board.legs.find((l) => l.toStopId === ceb.id)!
     const fromCeb = board.legs.find((l) => l.fromStopId === ceb.id)!
@@ -316,10 +324,15 @@ describe('buildTripBoard — cambios', () => {
       id: `dates-${ceb.id}`,
       group: 'dates',
       text: 'Elegir fechas de Cebú',
-      detail: 'Repartir 10 noches entre El Nido y Cebú (17 nov – 27 nov)',
+      detail: 'Repartir 8 noches entre El Nido y Cebú (19 nov – 27 nov)',
       stopId: ceb.id,
     })
-    assert.deepEqual(board.alerts.filter((a) => a.level === 'warn'), [])
+    assert.deepEqual(
+      board.alerts.filter((a) => a.level === 'warn').map((a) => a.text),
+      [
+        'Noche sin hotel en Manila (1ª vez): llegas el 15 nov y el hotel empieza el 17 nov.',
+      ],
+    )
   })
 
   it('un hotel elegido que empieza un día después de llegar deja una noche sin hotel', () => {

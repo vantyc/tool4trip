@@ -101,15 +101,27 @@ describe('boardEdits', () => {
 
   it('elegir un hotel lo vuelve principal y aparta a los demás de la estancia', () => {
     const b = filipinasNov2026Bundle()
+    // Booked lodging is locked; demotion only applies among non-booked options.
+    const options = b.travelOptions.map((o) =>
+      o.id === 'filipinas-nov-2026-p-hotel-mnl-15'
+        ? {
+            ...o,
+            status: 'researched' as const,
+            budgetRole: 'pending' as const,
+            title: 'Pendiente — hotel en Manila, 17 al 19 nov 2026',
+            provider: 'Seda BGC',
+          }
+        : o,
+    )
     const okura = {
-      ...b.travelOptions.find((o) => o.id === 'filipinas-nov-2026-p-hotel-mnl-15')!,
+      ...options.find((o) => o.id === 'filipinas-nov-2026-p-hotel-mnl-15')!,
       id: 'okura-15',
       externalId: 'okura-15',
       provider: 'Okura Manila',
       priceObserved: 9800,
       currency: 'MXN',
     }
-    const stop = buildTripBoard({ trip: b.trip, options: [...b.travelOptions, okura] }).stops[2]!
+    const stop = buildTripBoard({ trip: b.trip, options: [...options, okura] }).stops[2]!
     assert.equal(stop.lodging.length, 2)
     assert.deepEqual(
       chooseLodgingPlan(stop, 'okura-15').map((c) => [c.option.id, c.patch.budgetRole]),
@@ -209,11 +221,11 @@ describe('boardEdits', () => {
     assert.equal(item.paid, 5000)
   })
 
-  it('Cebú sin fechas: 6 noches en El Nido y 4 en Cebú', async () => {
+  it('Cebú sin fechas: 6 noches en El Nido y 2 en Cebú (ventana El Nido 19–27)', async () => {
     const b = filipinasNov2026Bundle()
     const ceb = newStayOption(b.trip.id, {
       place: 'Cebú',
-      window: { from: '2026-11-17', to: '2026-11-27' },
+      window: { from: '2026-11-19', to: '2026-11-27' },
     })
     assert.equal(ceb.title, 'Pendiente — hotel en Cebú, fechas por definir')
     assert.equal(ceb.startAt, undefined)
@@ -224,8 +236,8 @@ describe('boardEdits', () => {
     assert.deepEqual(
       plan.map((c) => [c.option.id, c.patch.startAt, c.patch.endAt]),
       [
-        ['filipinas-nov-2026-p-hotel-eni', undefined, '2026-11-23T11:00:00+08:00'],
-        [ceb.id, '2026-11-23T15:00:00+08:00', '2026-11-27T11:00:00+08:00'],
+        ['filipinas-nov-2026-p-hotel-eni', undefined, '2026-11-25T11:00:00+08:00'],
+        [ceb.id, '2026-11-25T15:00:00+08:00', '2026-11-27T11:00:00+08:00'],
       ],
     )
     assert.ok('stayWindow' in plan[1]!.patch && plan[1]!.patch.stayWindow === undefined)
@@ -235,7 +247,7 @@ describe('boardEdits', () => {
     const saved = [...svc.options.values()].map((o) => JSON.parse(JSON.stringify(o)) as TravelOption)
     const savedCeb = saved.find((o) => o.id === ceb.id)!
     assert.equal(savedCeb.stayWindow, undefined)
-    assert.equal(savedCeb.title, 'Pendiente — hotel en Cebú, 23 al 27 nov 2026')
+    assert.equal(savedCeb.title, 'Pendiente — hotel en Cebú, 25 al 27 nov 2026')
 
     const after = buildTripBoard({ trip: b.trip, options: saved })
     assert.deepEqual(
@@ -243,37 +255,49 @@ describe('boardEdits', () => {
       [
         ['Manila', 2],
         ['El Nido', 6],
-        ['Cebú', 4],
+        ['Cebú', 2],
         ['Manila', 1],
       ],
     )
-    assert.equal(after.legs.find((l) => l.toLabel === 'Cebú')!.dateHint, '2026-11-23')
+    assert.equal(after.legs.find((l) => l.toLabel === 'Cebú')!.dateHint, '2026-11-25')
     assert.equal(after.tasks.some((t) => t.group === 'dates'), false)
     const again = after.splits.find((s) => s.secondStopId === after.stops[4]!.id)!
     assert.equal(again.firstNights, 6)
     assert.deepEqual(
       splitNightsPlan(after, again, 7).map((c) => [c.patch.startAt, c.patch.endAt]),
       [
-        [undefined, '2026-11-24T11:00:00+08:00'],
-        ['2026-11-24T15:00:00+08:00', '2026-11-27T11:00:00+08:00'],
+        [undefined, '2026-11-26T11:00:00+08:00'],
+        ['2026-11-26T15:00:00+08:00', '2026-11-27T11:00:00+08:00'],
       ],
     )
   })
 
   it('cambiar fechas de una estancia mueve todos sus hoteles y conserva la hora', () => {
-    const stop = board().stops[2]!
-    const plan = stayDatesPlan(stop, '2026-11-15', '2026-11-18')
+    const b = filipinasNov2026Bundle()
+    // Booked stays lock dates; unlock Kanso for this edit-path check.
+    const options = b.travelOptions.map((o) =>
+      o.id === 'filipinas-nov-2026-p-hotel-mnl-15'
+        ? {
+            ...o,
+            status: 'researched' as const,
+            budgetRole: 'pending' as const,
+            title: 'Pendiente — hotel en Manila, 17 al 19 nov 2026',
+          }
+        : o,
+    )
+    const stop = buildTripBoard({ trip: b.trip, options }).stops[2]!
+    const plan = stayDatesPlan(stop, '2026-11-17', '2026-11-20')
     assert.deepEqual(
       plan.map((c) => [c.option.id, c.patch.startAt, c.patch.endAt, c.patch.title]),
       [
         [
           'filipinas-nov-2026-p-hotel-mnl-15',
-          '2026-11-15T15:00:00+08:00',
-          '2026-11-18T11:00:00+08:00',
-          'Pendiente — hotel en Manila, 15 al 18 nov 2026',
+          '2026-11-17T15:00:00+08:00',
+          '2026-11-20T11:00:00+08:00',
+          'Pendiente — hotel en Manila, 17 al 20 nov 2026',
         ],
       ],
     )
-    assert.deepEqual(stayDatesPlan(stop, '2026-11-18', '2026-11-18'), [])
+    assert.deepEqual(stayDatesPlan(stop, '2026-11-20', '2026-11-20'), [])
   })
 })

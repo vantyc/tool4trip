@@ -27,11 +27,11 @@ const LAX_MNL =
 const MEX_LAX =
   'https://www.skyscanner.com.mx/transporte/vuelos/mex/lax/261114/261129/?adultsv2=1&cabinclass=economy&currency=MXN&preferdirects=true'
 const MNL_ENI =
-  'https://www.kayak.com.mx/flights/MNL-ENI/2026-11-17?sort=duration_a'
+  'https://www.kayak.com.mx/flights/MNL-ENI/2026-11-19?sort=duration_a'
 const ENI_MNL =
   'https://www.kayak.com.mx/flights/ENI-MNL/2026-11-27?sort=duration_a'
 const CRK_ENI =
-  'https://www.kayak.com.mx/flights/CRK-ENI/2026-11-17?sort=price_a'
+  'https://www.kayak.com.mx/flights/CRK-ENI/2026-11-19?sort=price_a'
 const ENI_CRK =
   'https://www.kayak.com.mx/flights/ENI-CRK/2026-11-27?sort=price_a'
 const SEDA =
@@ -42,6 +42,8 @@ const HUNI =
   'https://www.trivago.com/en-US/oar/hotel-huni-lio-el-nido?search=100-13507802'
 const SEDA_LIO =
   'https://www.trivago.com.ph/en-PH/oar/resort-seda-lio-el-nido?search=100-9993284'
+/** Hosts Abyzz & Gavt accepted the Airbnb date change (one-time courtesy). */
+const KANSO_CHANGE = '2026-11-14T04:07:00-06:00'
 
 type Row = Omit<
   TravelOption,
@@ -269,7 +271,7 @@ export function filipinasNov2026Bundle(): {
       type: 'flight',
       status: 'researched',
       budgetRole: 'pending',
-      title: 'Pendiente — Manila → El Nido vía Cebu, 17 nov 2026',
+      title: 'Pendiente — Manila → El Nido vía Cebu, 19 nov 2026',
       provider: 'Cebu Pacific',
       origin: 'MNL',
       destination: 'ENI',
@@ -279,7 +281,7 @@ export function filipinasNov2026Bundle(): {
       nextAction:
         'Cotizar en MXN, con maleta, y anotar si los dos tramos van en un solo boleto.',
       notes:
-        'Sin cotización en esta carga. Evitar autobús, van compartida y lancha. La búsqueda es Manila–El Nido el 17 de noviembre.',
+        'Sin cotización en esta carga. Evitar autobús, van compartida y lancha. La búsqueda es Manila–El Nido el 19 de noviembre (traslado movido: Airbnb Makati queda hasta el 19).',
     }),
     row({
       id: 'filipinas-nov-2026-p-eni-mnl-ceb',
@@ -305,7 +307,7 @@ export function filipinasNov2026Bundle(): {
       type: 'flight',
       status: 'researched',
       budgetRole: 'pending',
-      title: 'Pendiente — Clark → El Nido directo, 17 nov 2026',
+      title: 'Pendiente — Clark → El Nido directo, 19 nov 2026',
       provider: 'Cebgo',
       origin: 'CRK',
       destination: 'ENI',
@@ -313,7 +315,8 @@ export function filipinasNov2026Bundle(): {
       verificationStatus: 'unverified',
       currency: undefined,
       nextAction: 'Cotizar el directo y cruzarlo con el auto privado Manila–Clark.',
-      notes: 'Sin cotización en esta carga. Es la otra ruta, separada de la de Cebu.',
+      notes:
+        'Sin cotización en esta carga. Es la otra ruta, separada de la de Cebu. Fecha movida al 19 por el Airbnb Makati 17–19.',
     }),
     row({
       id: 'filipinas-nov-2026-p-eni-crk',
@@ -337,13 +340,14 @@ export function filipinasNov2026Bundle(): {
       type: 'transfer',
       status: 'researched',
       budgetRole: 'pending',
-      title: 'Pendiente — auto privado Manila → Clark, 17 nov 2026',
+      title: 'Pendiente — auto privado Manila → Clark, 19 nov 2026',
       origin: 'Manila',
       destination: 'CRK',
       verificationStatus: 'unverified',
       currency: undefined,
-      nextAction: 'Cotizar sedan privado para el 17. Sin autobús ni van compartida.',
-      notes: 'Sin cotización para esa fecha. No usar una tarifa publicada de otro día.',
+      nextAction: 'Cotizar sedan privado para el 19. Sin autobús ni van compartida.',
+      notes:
+        'Sin cotización para esa fecha. No usar una tarifa publicada de otro día. Sale tras el check-out de Kanso (19 nov).',
     }),
     row({
       id: 'filipinas-nov-2026-p-car-crk-mnl',
@@ -363,20 +367,24 @@ export function filipinasNov2026Bundle(): {
       id: 'filipinas-nov-2026-p-hotel-mnl-15',
       externalId: 'filipinas-nov-2026-p-hotel-mnl-15',
       type: 'lodging',
-      status: 'researched',
-      budgetRole: 'pending',
-      title: 'Pendiente — hotel en Manila, 15 al 17 nov 2026',
-      provider: 'Seda BGC',
-      destination: 'Manila',
-      address: 'Bonifacio Global City, Taguig',
-      startAt: '2026-11-15T15:00:00+08:00',
-      endAt: '2026-11-17T11:00:00+08:00',
-      sourceUrl: SEDA,
-      verificationStatus: 'unverified',
+      status: 'booked',
+      budgetRole: 'primary',
+      amountPaid: 0,
+      title: 'Airbnb Kanso 簡素 Makati Home, 17 al 19 nov 2026',
+      provider: 'Airbnb — Abyzz y Gavt',
+      destination: 'Makati',
+      address: 'Makati, Metro Manila',
+      startAt: '2026-11-17T15:00:00+08:00',
+      endAt: '2026-11-19T11:00:00+08:00',
+      checkedAt: KANSO_CHANGE,
+      verificationStatus: 'verified',
       currency: undefined,
       nextAction:
-        'Cotizar Seda BGC y Okura, total con impuestos y cancelación, para el 15–17.',
-      notes: `Ventana pedida: noche del 15 y del 16. La hora de entrada no está confirmada. Okura: ${OKURA}. Sin cotización.`,
+        'Check-in autónomo ~23:00 ok. Instrucciones (caja de llaves) llegan un día antes. Otro cambio de fecha = política de cancelación estándar.',
+      notes:
+        'Cambio de fecha autorizado por Abyzz y Gavt el 14 nov 2026 como cortesía única (cancelaciones de vuelos). Reserva Airbnb: 17–19 nov. Antes la ventana investigada era 15–17 (Seda/Okura). Seda: ' +
+        SEDA +
+        `. Okura: ${OKURA}.`,
     }),
     row({
       id: 'filipinas-nov-2026-p-hotel-mnl-27',
@@ -403,17 +411,17 @@ export function filipinasNov2026Bundle(): {
       type: 'lodging',
       status: 'researched',
       budgetRole: 'pending',
-      title: 'Pendiente — hotel en El Nido, 17 al 27 nov 2026',
+      title: 'Pendiente — hotel en El Nido, 19 al 27 nov 2026',
       provider: 'Huni Lio',
       destination: 'El Nido',
-      startAt: '2026-11-17T15:00:00+08:00',
+      startAt: '2026-11-19T15:00:00+08:00',
       endAt: '2026-11-27T11:00:00+08:00',
       sourceUrl: HUNI,
       verificationStatus: 'unverified',
       currency: undefined,
       nextAction:
-        'Cotizar Huni Lio y Seda Lio, total con impuestos y cancelación, del 17 al 27.',
-      notes: `Diez noches pedidas. Habitación privada con aire. Seda Lio: ${SEDA_LIO}. Sin cotización.`,
+        'Cotizar Huni Lio y Seda Lio, total con impuestos y cancelación, del 19 al 27.',
+      notes: `Ocho noches (antes diez: 17–27). Ventana recortada porque Airbnb Makati queda hasta el 19. Habitación privada con aire. Seda Lio: ${SEDA_LIO}. Sin cotización.`,
     }),
     row({
       id: 'filipinas-nov-2026-p-asiento',
@@ -451,9 +459,9 @@ export function filipinasNov2026Bundle(): {
     ],
     status: 'planned',
     notes:
-      'Opción provisional: dos boletos United por San Francisco. Salida de CDMX el 14 nov 2026 y regreso el 28 a las 19:35. Subtotal 31,628 MXN con una maleta de 23 kg en el tramo corto. El boleto único de 40,886 MXN queda como alternativa. Cotizado el 3 nov 2026 en Skyscanner México. Sin reserva ni pago. Las búsquedas nuevas de este viaje se guardan en este mismo registro.',
+      'Opción provisional: dos boletos United por San Francisco. Salida de CDMX el 14 nov 2026 y regreso el 28 a las 19:35. Subtotal 31,628 MXN con una maleta de 23 kg en el tramo corto. El boleto único de 40,886 MXN queda como alternativa. Cotizado el 3 nov 2026 en Skyscanner México. Airbnb Kanso Makati confirmado 17–19 (cambio de fecha autorizado 14 nov). El Nido y traslados internos replanificados al 19. Las búsquedas nuevas de este viaje se guardan en este mismo registro.',
     createdAt: CHECKED,
-    updatedAt: CHECKED,
+    updatedAt: KANSO_CHANGE,
     syncStatus: 'synced',
   }
 
@@ -469,6 +477,28 @@ export function filipinasNov2026Bundle(): {
       updatedAt: CHECKED,
       syncStatus: 'synced',
     },
+    {
+      id: 'filipinas-nov-2026-ck-eni-shift',
+      tripId: FILIPINAS_TRIP_ID,
+      label:
+        'Replanificar El Nido y vuelos internos al 19 nov (Airbnb Makati 17–19 autorizado). Cotizar hotel 19–27 y MNL/CRK→ENI del 19.',
+      status: 'open',
+      sortOrder: 1,
+      createdAt: KANSO_CHANGE,
+      updatedAt: KANSO_CHANGE,
+      syncStatus: 'synced',
+    },
+    {
+      id: 'filipinas-nov-2026-ck-gap-15',
+      tripId: FILIPINAS_TRIP_ID,
+      label:
+        'Si UA809 sigue llegando el 15: cubrir noches 15–16 en Manila (Kanso empieza el 17) o confirmar el nuevo arribo.',
+      status: 'open',
+      sortOrder: 2,
+      createdAt: KANSO_CHANGE,
+      updatedAt: KANSO_CHANGE,
+      syncStatus: 'synced',
+    },
   ]
 
   const notes: Note[] = [
@@ -476,9 +506,9 @@ export function filipinasNov2026Bundle(): {
       id: 'filipinas-nov-2026-nota',
       tripId: FILIPINAS_TRIP_ID,
       title: 'Itinerario elegido',
-      body: '14 nov 05:45 UA822 MEX→SFO 08:44. 14:05 UA809 SFO→MNL 21:10 del 15. Manila 15–17, El Nido 17–27, Manila 27–28. 28 nov 09:55 UA190 MNL→SFO 06:35 y 13:14 UA817 SFO→MEX 19:35. Dos boletos, sin protección entre sí. Nada reservado ni pagado.',
+      body: '14 nov 05:45 UA822 MEX→SFO 08:44. 14:05 UA809 SFO→MNL 21:10 del 15. Airbnb Kanso Makati 17–19 (cambio autorizado 14 nov por Abyzz/Gavt; check-in ~23:00 ok). El Nido 19–27, Manila 27–28. 28 nov 09:55 UA190 MNL→SFO 06:35 y 13:14 UA817 SFO→MEX 19:35. Dos boletos, sin protección entre sí. Internos y El Nido aún sin reservar.',
       createdAt: CHECKED,
-      updatedAt: CHECKED,
+      updatedAt: KANSO_CHANGE,
       syncStatus: 'synced',
     },
   ]
@@ -491,8 +521,8 @@ export function filipinasNov2026Bundle(): {
       importedAt: CHECKED,
       optionCount: travelOptions.length,
       schemaVersion: 1,
-      revision: 1,
-      generatedAt: CHECKED,
+      revision: 2,
+      generatedAt: KANSO_CHANGE,
     },
   ]
 
