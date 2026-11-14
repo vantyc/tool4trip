@@ -44,6 +44,9 @@ const SEDA_LIO =
   'https://www.trivago.com.ph/en-PH/oar/resort-seda-lio-el-nido?search=100-9993284'
 /** Hosts Abyzz & Gavt accepted the Airbnb date change (one-time courtesy). */
 const KANSO_CHANGE = '2026-11-14T04:07:00-06:00'
+/** United profile primary email verified (for booking confirmations). */
+const UNITED_EMAIL_CHANGE = '2026-11-14T04:50:00-06:00'
+const UNITED_PRIMARY_EMAIL = 'rafael.carrasco.us@gmail.com'
 
 type Row = Omit<
   TravelOption,
@@ -459,9 +462,11 @@ export function filipinasNov2026Bundle(): {
     ],
     status: 'planned',
     notes:
-      'Opción provisional: dos boletos United por San Francisco. Salida de CDMX el 14 nov 2026 y regreso el 28 a las 19:35. Subtotal 31,628 MXN con una maleta de 23 kg en el tramo corto. El boleto único de 40,886 MXN queda como alternativa. Cotizado el 3 nov 2026 en Skyscanner México. Airbnb Kanso Makati confirmado 17–19 (cambio de fecha autorizado 14 nov). El Nido y traslados internos replanificados al 19. Las búsquedas nuevas de este viaje se guardan en este mismo registro.',
+      'Opción provisional: dos boletos United por San Francisco. Salida de CDMX el 14 nov 2026 y regreso el 28 a las 19:35. Subtotal 31,628 MXN con una maleta de 23 kg en el tramo corto. El boleto único de 40,886 MXN queda como alternativa. Cotizado el 3 nov 2026 en Skyscanner México. Airbnb Kanso Makati confirmado 17–19 (cambio de fecha autorizado 14 nov). El Nido y traslados internos replanificados al 19. Cuenta United: correo primario verificado ' +
+      UNITED_PRIMARY_EMAIL +
+      '. Las búsquedas nuevas de este viaje se guardan en este mismo registro.',
     createdAt: CHECKED,
-    updatedAt: KANSO_CHANGE,
+    updatedAt: UNITED_EMAIL_CHANGE,
     syncStatus: 'synced',
   }
 
@@ -478,12 +483,22 @@ export function filipinasNov2026Bundle(): {
       syncStatus: 'synced',
     },
     {
+      id: 'filipinas-nov-2026-ck-united-email',
+      tripId: FILIPINAS_TRIP_ID,
+      label: `United: correo primario verificado (${UNITED_PRIMARY_EMAIL}). Confirmaciones de boleto irán ahí.`,
+      status: 'done',
+      sortOrder: 1,
+      createdAt: UNITED_EMAIL_CHANGE,
+      updatedAt: UNITED_EMAIL_CHANGE,
+      syncStatus: 'synced',
+    },
+    {
       id: 'filipinas-nov-2026-ck-eni-shift',
       tripId: FILIPINAS_TRIP_ID,
       label:
         'Replanificar El Nido y vuelos internos al 19 nov (Airbnb Makati 17–19 autorizado). Cotizar hotel 19–27 y MNL/CRK→ENI del 19.',
       status: 'open',
-      sortOrder: 1,
+      sortOrder: 2,
       createdAt: KANSO_CHANGE,
       updatedAt: KANSO_CHANGE,
       syncStatus: 'synced',
@@ -494,7 +509,7 @@ export function filipinasNov2026Bundle(): {
       label:
         'Si UA809 sigue llegando el 15: cubrir noches 15–16 en Manila (Kanso empieza el 17) o confirmar el nuevo arribo.',
       status: 'open',
-      sortOrder: 2,
+      sortOrder: 3,
       createdAt: KANSO_CHANGE,
       updatedAt: KANSO_CHANGE,
       syncStatus: 'synced',
@@ -511,6 +526,15 @@ export function filipinasNov2026Bundle(): {
       updatedAt: KANSO_CHANGE,
       syncStatus: 'synced',
     },
+    {
+      id: 'filipinas-nov-2026-nota-united',
+      tripId: FILIPINAS_TRIP_ID,
+      title: 'Cuenta United',
+      body: `Correo primario verificado el 14 nov 2026: ${UNITED_PRIMARY_EMAIL}. Secundario en perfil: vantyc@hotmail.com. Listo para recibir confirmaciones al comprar UA822/UA809 (y regreso).`,
+      createdAt: UNITED_EMAIL_CHANGE,
+      updatedAt: UNITED_EMAIL_CHANGE,
+      syncStatus: 'synced',
+    },
   ]
 
   const packageImports: PackageImport[] = [
@@ -521,8 +545,8 @@ export function filipinasNov2026Bundle(): {
       importedAt: CHECKED,
       optionCount: travelOptions.length,
       schemaVersion: 1,
-      revision: 2,
-      generatedAt: KANSO_CHANGE,
+      revision: 3,
+      generatedAt: UNITED_EMAIL_CHANGE,
     },
   ]
 
