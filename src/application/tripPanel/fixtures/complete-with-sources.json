@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "packageId": "fixture-complete-with-sources",
+  "revision": 1,
+  "trip": {
+    "id": "trip-complete-1",
+    "title": "Ciudad de México → Guadalajara",
+    "destination": "Guadalajara",
+    "startDate": "2026-10-01",
+    "endDate": "2026-10-04",
+    "timezone": "America/Mexico_City",
+    "goals": ["familia"],
+    "status": "planned"
+  },
+  "travelOptions": [
+    {
+      "externalId": "flt-out",
+      "type": "flight",
+      "status": "shortlisted",
+      "title": "MEX → GDL ida",
+      "origin": "MEX — CDMX",
+      "destination": "GDL — Guadalajara",
+      "startAt": "2026-10-01T09:00:00-06:00",
+      "provider": "Aeroméxico",
+      "priceObserved": 1200,
+      "currency": "MXN",
+      "verificationStatus": "verified",
+      "sourceType": "agent",
+      "sourceUrl": "https://example.com/flights/out"
+    },
+    {
+      "externalId": "flt-ret",
+      "type": "flight",
+      "status": "shortlisted",
+      "title": "GDL → MEX regreso",
+      "origin": "GDL",
+      "destination": "MEX",
+      "startAt": "2026-10-04T18:00:00-06:00",
+      "provider": "Volaris",
+      "priceObserved": 1100,
+      "currency": "MXN",
+      "verificationStatus": "verified",
+      "sourceType": "agent",
+      "sourceUrl": "https://example.com/flights/ret"
+    },
+    {
+      "externalId": "lodge-1",
+      "type": "lodging",
+      "status": "shortlisted",
+      "title": "Hotel Centro Guadalajara",
+      "destination": "Guadalajara",
+      "provider": "Hotel Centro",
+      "startAt": "2026-10-01T15:00:00-06:00",
+      "endAt": "2026-10-04T12:00:00-06:00",
+      "priceObserved": 2400,
+      "currency": "MXN",
+      "verificationStatus": "verified",
+      "sourceType": "agent",
+      "sourceUrl": "https://example.com/hotel"
+    },
+    {
+      "externalId": "bus-1",
+      "type": "transfer",
+      "status": "researched",
+      "title": "Traslado aeropuerto → hotel",
+      "origin": "GDL",
+      "destination": "Hotel Centro Guadalajara",
+      "startAt": "2026-10-01T11:00:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "agent",
+      "sourceUrl": "https://example.com/transfer"
+    }
+  ],
+  "itineraryItems": [
+    {
+      "externalId": "itin-1",
+      "title": "Cena familiar",
+      "startAt": "2026-10-02T20:00:00-06:00",
+      "place": "Guadalajara",
+      "importance": "recommended"
+    }
+  ],
+  "checklistItems": [
+    { "externalId": "chk-1", "label": "Confirmar asientos" }
+  ],
+  "notes": [
+    { "externalId": "note-1", "body": "Llevar documentos" }
+  ]
+}

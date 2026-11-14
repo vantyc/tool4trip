@@ -41,7 +41,14 @@ const travelOptionType = z.enum([
 
 const packageOptionStatus = z.enum(PACKAGE_OPTION_STATUSES)
 const verificationStatus = z.enum(['verified', 'estimated', 'unverified'])
-const sourceType = z.enum(['cursor', 'manual', 'imported', 'agent', 'other'])
+const sourceType = z.enum([
+  'cursor',
+  'manual',
+  'imported',
+  'agent',
+  'other',
+  'flight_schedule',
+])
 
 const externalId = z
   .string()
@@ -87,6 +94,15 @@ const packageTravelOptionSchema = z
     verificationStatus: verificationStatus.optional(),
     sourceType: sourceType.default('agent'),
     notes: z.string().optional(),
+    logicalRole: z
+      .enum([
+        'flight_outbound',
+        'flight_return',
+        'lodging_primary',
+        'lodging_fallback',
+        'ground_transfer',
+      ])
+      .optional(),
   })
   .strict()
   .superRefine((opt, ctx) => {
@@ -114,9 +130,9 @@ const packageItineraryItemSchema = z
 const packageChecklistItemSchema = z
   .object({
     externalId,
-    title: z.string().min(1),
-    status: z.enum(['open', 'done']).default('open'),
-    notes: z.string().optional(),
+    label: z.string().min(1),
+    dueAt: isoWithOffset.optional(),
+    sortOrder: z.number().int().nonnegative().optional(),
   })
   .strict()
 
@@ -145,7 +161,21 @@ export const tripPackageV1Schema = z
 
 export type SharedTripPackageV1 = z.infer<typeof tripPackageV1Schema>
 
-export const agentOpSchema = z.enum(['add', 'update', 'supersede', 'noop'])
+/**
+ * Executable mutation ops for Ask Travel Apply (not presentation).
+ * - add / update: entity must appear in package (upsert by externalId)
+ * - supersede: package carries `externalId` (new); removes `supersedesExternalId` (old)
+ * - remove: deletes `externalId` explicitly — absence from package alone is NOT a delete
+ * - noop: ignored by Apply
+ * diffSummary may mirror these for UI only; Apply executes `ops[]`.
+ */
+export const agentOpSchema = z.enum([
+  'add',
+  'update',
+  'supersede',
+  'remove',
+  'noop',
+])
 
 export const agentDiffLineSchema = z
   .object({
@@ -165,7 +195,7 @@ export const agentDiffLineSchema = z
   })
   .strict()
 
-/** Reserved for future supersede; Fase 1 may omit or mirror package. */
+/** Typed mutation op executed by Apply (trip-api import-package). */
 export const agentOpRecordSchema = z
   .object({
     op: agentOpSchema,
@@ -175,11 +205,59 @@ export const agentOpRecordSchema = z
       'checklistItem',
       'note',
     ]),
+    /** For add/update/supersede: new/target entity in package. For remove: entity to delete. */
     externalId: z.string().min(1),
+    /** Required when op=supersede: research entity replaced by externalId. */
     supersedesExternalId: z.string().min(1).optional(),
     note: z.string().optional(),
   })
   .strict()
+  .superRefine((op, ctx) => {
+    if (op.op === 'supersede' && !op.supersedesExternalId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'supersede requires supersedesExternalId',
+        path: ['supersedesExternalId'],
+      })
+    }
+    if (op.op === 'remove' && op.supersedesExternalId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'remove must not set supersedesExternalId',
+        path: ['supersedesExternalId'],
+      })
+    }
+  })
+
+export type AgentOpRecord = z.infer<typeof agentOpRecordSchema>
+
+/** Body for transactional Apply: package upsert + explicit ops. */
+export const packageApplyBodySchema = z
+  .object({
+    package: tripPackageV1Schema,
+    ops: z.array(agentOpRecordSchema).default([]),
+    /** From compile-preview; required by Ask Travel client (requirePreviewGate). */
+    expectedFingerprint: z.string().min(1).optional(),
+    expectedPlanHash: z.string().min(1).optional(),
+    proposalId: z.string().min(1).optional(),
+    /**
+     * Ask Travel sets true so the server rejects Apply without a fingerprint.
+     * Legacy package import omits this → no stale gate.
+     */
+    requirePreviewGate: z.boolean().optional(),
+  })
+  .strict()
+
+/** Body for compile-preview (no write). */
+export const compilePreviewBodySchema = z
+  .object({
+    package: tripPackageV1Schema,
+    ops: z.array(agentOpRecordSchema).default([]),
+    proposalId: z.string().min(1).optional(),
+  })
+  .strict()
+
+export type CompilePreviewBody = z.infer<typeof compilePreviewBodySchema>
 
 export const toolTraceEntrySchema = z
   .object({
@@ -217,6 +295,47 @@ export const agentProposalSchema = z
         confidence: z.enum(['estimated', 'unverified', 'verified']).optional(),
       })
       .optional(),
+    /** Server-owned research coverage diagnostics (not LLM-authored). */
+    researchDiagnostics: z
+      .object({
+        goals: z
+          .array(
+            z
+              .object({
+                id: z.string().min(1),
+                kind: z.string().min(1),
+                label: z.string().min(1),
+                important: z.boolean(),
+                status: z.enum(['RESOLVED', 'PARTIAL', 'UNRESOLVED']),
+                evidenceNote: z.string().optional(),
+                tier: z.enum(['critical', 'supporting', 'secondary']).optional(),
+              })
+              .strict(),
+          )
+          .default([]),
+        candidates: z
+          .array(
+            z
+              .object({
+                url: z.string().min(1),
+                query: z.string().optional(),
+                goalIds: z.array(z.string()).default([]),
+                decision: z.enum(['accepted', 'rejected']),
+                reason: z.string().min(1),
+                note: z.string().optional(),
+              })
+              .strict(),
+          )
+          .default([]),
+        toolRounds: z.number().int().nonnegative(),
+        toolCallsUsed: z.number().int().nonnegative(),
+        maxToolCalls: z.number().int().positive(),
+        forcedExtraRounds: z.number().int().nonnegative(),
+        consultedSourceCount: z.number().int().nonnegative(),
+        anchoredSourceCount: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 
@@ -238,14 +357,205 @@ export const tripContextSnapshotSchema = z
 
 export type TripContextSnapshot = z.infer<typeof tripContextSnapshotSchema>
 
+export const agentAskModeSchema = z.enum([
+  'ask',
+  'new_travel',
+  'component_action',
+])
+
+export type AgentAskMode = z.infer<typeof agentAskModeSchema>
+
+export const componentActionIntentSchema = z.enum([
+  'adjust',
+  'verify',
+  'find_alternative',
+])
+
+export const componentActionOperationSchema = z.enum([
+  'EDIT',
+  'RESEARCH_REPLAN',
+  'VERIFY',
+])
+
+export const componentKindSchema = z.enum([
+  'travelOption',
+  'itineraryItem',
+  'checklistItem',
+  'note',
+])
+
+export const provenanceStampSchema = z
+  .object({
+    sourceType: sourceType,
+    verificationStatus: verificationStatus,
+    sourceUrl: httpUrl.optional(),
+    checkedAt: isoWithOffset.optional(),
+    note: z.string().optional(),
+  })
+  .strict()
+
+export type ProvenanceStamp = z.infer<typeof provenanceStampSchema>
+
+export const provenanceHistoryEventSchema = z.enum([
+  'user_edit',
+  'verify_ok',
+  'verify_fail',
+  'research_alt_added',
+  'promote_alternative',
+])
+
+export const provenanceHistoryEntrySchema = z
+  .object({
+    at: isoWithOffset,
+    event: provenanceHistoryEventSchema,
+    sourceType: sourceType,
+    verificationStatus: verificationStatus,
+    sourceUrl: httpUrl.optional(),
+    fields: z.array(z.string().min(1)).default([]),
+    note: z.string().min(1),
+  })
+  .strict()
+
+export type ProvenanceHistoryEntry = z.infer<typeof provenanceHistoryEntrySchema>
+
+export const entityPatchSchema = z
+  .object({
+    componentId: externalId,
+    componentKind: componentKindSchema,
+    op: z.enum(['update', 'add']),
+    before: z.record(z.unknown()).default({}),
+    after: z.record(z.unknown()),
+    changedFields: z.array(z.string().min(1)).default([]),
+    provenance: provenanceStampSchema,
+    provenanceHistoryAppend: z.array(provenanceHistoryEntrySchema).default([]),
+  })
+  .strict()
+
+export type EntityPatch = z.infer<typeof entityPatchSchema>
+
+export const impactSuggestionSchema = z
+  .object({
+    impactId: z.string().min(1),
+    componentId: z.string().min(1),
+    componentKind: componentKindSchema,
+    relation: z.string().min(1),
+    reason: z.string().min(1),
+    severity: z.enum(['info', 'warning']).default('warning'),
+    suggestedPatch: entityPatchSchema.optional(),
+    requiresUserChoice: z.boolean().default(true),
+  })
+  .strict()
+
+export type ImpactSuggestion = z.infer<typeof impactSuggestionSchema>
+
+export const alternativeOptionSchema = z
+  .object({
+    provisionalExternalId: externalId,
+    summary: z.string().min(1),
+    option: packageTravelOptionSchema,
+    provenance: provenanceStampSchema,
+  })
+  .strict()
+
+export type AlternativeOption = z.infer<typeof alternativeOptionSchema>
+
+export const relatedSnapshotSchema = z
+  .object({
+    componentId: z.string().min(1),
+    componentKind: componentKindSchema,
+    componentType: z.string().optional(),
+    relation: z.string().min(1),
+    snapshot: z.record(z.unknown()),
+  })
+  .strict()
+
+export const componentActionPayloadSchema = z
+  .object({
+    contextSource: z.enum(['persisted', 'draft']),
+    baseRevision: z.number().int().min(1),
+    baseComponentUpdatedAt: isoWithOffset.optional(),
+    componentId: externalId,
+    entityId: z.string().min(1).optional(),
+    componentKind: componentKindSchema,
+    componentType: z.string().min(1),
+    actionIntent: componentActionIntentSchema,
+    instruction: z.string().max(4000).optional(),
+    snapshot: z.record(z.unknown()),
+    relatedSnapshots: z.array(relatedSnapshotSchema).default([]),
+    draftPackage: tripPackageV1Schema.optional(),
+    tripHeader: z
+      .object({
+        title: z.string().min(1),
+        startDate: dateYmd,
+        endDate: dateYmd,
+        timezone: z.string().min(1),
+        destination: z.string().optional(),
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    if (v.actionIntent === 'adjust' && !v.instruction?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'instruction es obligatorio para actionIntent=adjust',
+        path: ['instruction'],
+      })
+    }
+  })
+
+export type ComponentActionPayload = z.infer<typeof componentActionPayloadSchema>
+
+export const componentActionResultSchema = z
+  .object({
+    resultId: z.string().min(1),
+    createdAt: z.string().min(1),
+    operation: componentActionOperationSchema,
+    actionIntent: componentActionIntentSchema,
+    target: z
+      .object({
+        componentId: externalId,
+        entityId: z.string().min(1).optional(),
+        componentKind: componentKindSchema,
+        componentType: z.string().min(1),
+      })
+      .strict(),
+    baseRevision: z.number().int().min(1),
+    expectedRevisionOnApply: z.number().int().min(1),
+    narrative: z.string().min(1),
+    warnings: z.array(z.string()).default([]),
+    diffSummary: z.array(agentDiffLineSchema).default([]),
+    patches: z.array(entityPatchSchema).default([]),
+    alternatives: z.array(alternativeOptionSchema).default([]),
+    impacts: z.array(impactSuggestionSchema).default([]),
+    toolTrace: z.array(toolTraceEntrySchema).default([]),
+    ops: z.array(agentOpRecordSchema).default([]),
+    contextSource: z.enum(['persisted', 'draft']),
+  })
+  .strict()
+
+export type ComponentActionResult = z.infer<typeof componentActionResultSchema>
+
 export const agentAskRequestSchema = z
   .object({
     prompt: z.string().min(1).max(8000),
     tripId: z.string().min(1),
     context: tripContextSnapshotSchema,
     locale: z.string().optional(),
+    /** ask | new_travel | component_action */
+    mode: agentAskModeSchema.default('ask'),
+    componentAction: componentActionPayloadSchema.optional(),
   })
   .strict()
+  .superRefine((v, ctx) => {
+    if (v.mode === 'component_action' && !v.componentAction) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'componentAction es obligatorio cuando mode=component_action',
+        path: ['componentAction'],
+      })
+    }
+  })
 
 export type AgentAskRequest = z.infer<typeof agentAskRequestSchema>
 
@@ -285,8 +595,27 @@ export const agentJobStatusResponseSchema = z
     progress: z.string().optional(),
     toolTrace: z.array(toolTraceEntrySchema).optional(),
     proposal: agentProposalSchema.optional(),
+    /** Interactive TripPanel — sibling to proposal, not a full package regen. */
+    componentActionResult: componentActionResultSchema.optional(),
     error: agentJobErrorSchema.optional(),
   })
   .strict()
 
 export type AgentJobStatusResponse = z.infer<typeof agentJobStatusResponseSchema>
+
+/** Client apply filter — only explicitly accepted IDs are merged. */
+export const applyComponentActionInputSchema = z
+  .object({
+    result: componentActionResultSchema,
+    acceptedPatchComponentIds: z.array(z.string().min(1)).default([]),
+    acceptedImpactIds: z.array(z.string().min(1)).default([]),
+    acceptedAlternativeIds: z.array(z.string().min(1)).default([]),
+    /** Promote researched alt → preferred (shortlisted); demote previous. */
+    promoteAlternativeId: z.string().min(1).optional(),
+    currentRevision: z.number().int().min(1),
+  })
+  .strict()
+
+export type ApplyComponentActionInput = z.infer<
+  typeof applyComponentActionInputSchema
+>

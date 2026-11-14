@@ -35,7 +35,7 @@ Env no secretos (en Deployment):
 - `LLM_MAX_TOKENS=4096`
 - `WEB_SEARCH_PROVIDER=tavily`
 - `ENABLE_DDG_FALLBACK=0`
-- `LLM_MAX_TOKENS=8192` / `AGENT_MAX_TOOL_CALLS=6` / `AGENT_MAX_STEPS=8` / `LLM_TIMEOUT_MS=180000` (job budget, not HTTP)
+- `LLM_MAX_TOKENS=8192` / `AGENT_MAX_TOOL_CALLS=6` / `AGENT_MAX_TOOL_CALLS_MULTI_OBJECTIVE=12` / `AGENT_MAX_STEPS=10` / `LLM_TIMEOUT_MS=180000` (job budget, not HTTP)
 - `AGENT_JOB_MAX_CONCURRENCY=1` / `AGENT_JOB_TTL_MS=2700000` / `AGENT_JOB_MAX_JOBS=50`
 
 Swap de proveedor (solo env, sin tocar PWA): cambiar `LLM_BASE_URL` / `LLM_MODEL` / secret `LLM_API_KEY`.
@@ -46,3 +46,13 @@ Swap de proveedor (solo env, sin tocar PWA): cambiar `LLM_BASE_URL` / `LLM_MODEL
 - `https://tool4trip.com/login` → form
 - `https://tool4trip.com/api/agent/ask` → 202 job (ForwardAuth)
 - `https://tool4trip.com/api/agent/jobs/:id` → status / proposal
+
+## Cloud trips (Postgres + trip-api)
+
+Create DB secret before applying postgres / trip-api:
+
+```bash
+POSTGRES_PASSWORD='...' ./scripts/create-trip-api-db-secret.sh
+```
+
+Images: `ghcr.io/vantyc/trip-api:latest`. Ingress `/api/trips*` (+ nested entity paths) uses the same ForwardAuth middleware as the agent.

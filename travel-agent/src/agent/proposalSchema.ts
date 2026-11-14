@@ -107,7 +107,7 @@ export const agentProposalJsonSchema = {
           entityRef: strOrNull,
           op: {
             type: 'string',
-            enum: ['add', 'update', 'supersede', 'noop'],
+            enum: ['add', 'update', 'supersede', 'remove', 'noop'],
           },
           before: strOrNull,
           after: strOrNull,
@@ -268,12 +268,12 @@ export const agentProposalJsonSchema = {
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['externalId', 'title', 'status', 'notes'],
+            required: ['externalId', 'label', 'dueAt', 'sortOrder'],
             properties: {
               externalId: { type: 'string' },
-              title: { type: 'string' },
-              status: { type: 'string', enum: ['open', 'done'] },
-              notes: strOrNull,
+              label: { type: 'string' },
+              dueAt: strOrNull,
+              sortOrder: { type: ['number', 'null'] },
             },
           },
         },
@@ -301,7 +301,7 @@ export const agentProposalJsonSchema = {
         properties: {
           op: {
             type: 'string',
-            enum: ['add', 'update', 'supersede', 'noop'],
+            enum: ['add', 'update', 'supersede', 'remove', 'noop'],
           },
           entityKind: {
             type: 'string',

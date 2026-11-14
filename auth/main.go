@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	cookieName  = "tool4trip_session"
+	cookieName = "tool4trip_session"
 	// Legacy cookie from /travel/ era — cleared on logout; not accepted for auth.
 	legacyCookieName = "viajes_session"
 	cookiePath       = "/"
@@ -39,6 +39,9 @@ type config struct {
 	username     string
 	passwordHash []byte
 	sessionKey   []byte
+	// Optional read-only guest; empty when not configured.
+	guestUsername     string
+	guestPasswordHash []byte
 }
 
 type sessionPayload struct {
@@ -92,12 +95,54 @@ func loadConfig() (*config, error) {
 	if len(secret) < 32 {
 		return nil, fmt.Errorf("SESSION_SECRET must be at least 32 bytes")
 	}
-	return &config{
+	cfg := &config{
 		addr:         addr,
 		username:     user,
 		passwordHash: []byte(hash),
 		sessionKey:   []byte(secret),
-	}, nil
+	}
+	guest := strings.TrimSpace(os.Getenv("AUTH_GUEST_USERNAME"))
+	guestHash := strings.TrimSpace(os.Getenv("AUTH_GUEST_PASSWORD_HASH"))
+	switch {
+	case guest == "" && guestHash == "":
+	case guest == "" || guestHash == "":
+		log.Printf("guest access disabled: AUTH_GUEST_USERNAME and AUTH_GUEST_PASSWORD_HASH go together")
+	case guest == user:
+		log.Printf("guest access disabled: guest username equals the owner")
+	default:
+		cfg.guestUsername = guest
+		cfg.guestPasswordHash = []byte(strings.Replace(guestHash, "$2y$", "$2a$", 1))
+		log.Printf("read-only guest access enabled")
+	}
+	return cfg, nil
+}
+
+func (c *config) isGuest(username string) bool {
+	return c.guestUsername != "" && subtle.ConstantTimeCompare([]byte(username), []byte(c.guestUsername)) == 1
+}
+
+// authenticate reports whether the credentials belong to the owner or the guest.
+func (c *config) authenticate(username, password string) bool {
+	if subtle.ConstantTimeCompare([]byte(username), []byte(c.username)) == 1 {
+		return bcrypt.CompareHashAndPassword(c.passwordHash, []byte(password)) == nil
+	}
+	if c.isGuest(username) {
+		return bcrypt.CompareHashAndPassword(c.guestPasswordHash, []byte(password)) == nil
+	}
+	_ = bcrypt.CompareHashAndPassword(c.passwordHash, []byte(password))
+	return false
+}
+
+// guestMayRequest: the guest only reads, and never reaches the agent (paid calls).
+func guestMayRequest(method, uri string) bool {
+	if method != http.MethodGet && method != http.MethodHead {
+		return false
+	}
+	path := strings.ToLower(uri)
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+	return path != "/api/agent" && !strings.HasPrefix(path, "/api/agent/")
 }
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -122,9 +167,7 @@ func (c *config) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(r.FormValue("username"))
 	password := r.FormValue("password")
 
-	userOK := subtle.ConstantTimeCompare([]byte(username), []byte(c.username)) == 1
-	passOK := bcrypt.CompareHashAndPassword(c.passwordHash, []byte(password)) == nil
-	if !userOK || !passOK {
+	if !c.authenticate(username, password) {
 		time.Sleep(200 * time.Millisecond)
 		c.writeLogin(w, http.StatusUnauthorized, username, "Usuario o contraseña incorrectos.")
 		return
@@ -174,16 +217,22 @@ func clearCookie(name, path string) *http.Cookie {
 }
 
 func (c *config) handleVerify(w http.ResponseWriter, r *http.Request) {
-	if sess, ok := c.sessionFromRequest(r); ok {
-		w.Header().Set("X-Viajes-User", sess.U)
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
 	forwardedURI := r.Header.Get("X-Forwarded-Uri")
 	forwardedMethod := r.Header.Get("X-Forwarded-Method")
 	if forwardedMethod == "" {
 		forwardedMethod = r.Method
+	}
+
+	if sess, ok := c.sessionFromRequest(r); ok {
+		if c.isGuest(sess.U) && !guestMayRequest(forwardedMethod, forwardedURI) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"Acceso de solo lectura"}` + "\n"))
+			return
+		}
+		w.Header().Set("X-Viajes-User", sess.U)
+		w.WriteHeader(http.StatusOK)
+		return
 	}
 	if shouldRedirectToLogin(forwardedMethod, forwardedURI) {
 		w.Header().Set("Location", publicLoginURL(r))
@@ -292,7 +341,7 @@ func (c *config) parseSession(token string) (*sessionPayload, bool) {
 	if time.Now().UTC().Unix() > payload.E {
 		return nil, false
 	}
-	if subtle.ConstantTimeCompare([]byte(payload.U), []byte(c.username)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(payload.U), []byte(c.username)) != 1 && !c.isGuest(payload.U) {
 		return nil, false
 	}
 	return &payload, true

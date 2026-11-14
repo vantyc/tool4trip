@@ -43,8 +43,10 @@ spec:
               value: "8192"
             - name: AGENT_MAX_TOOL_CALLS
               value: "6"
+            - name: AGENT_MAX_TOOL_CALLS_MULTI_OBJECTIVE
+              value: "12"
             - name: AGENT_MAX_STEPS
-              value: "8"
+              value: "10"
             - name: LLM_TIMEOUT_MS
               value: "180000"
             - name: AGENT_JOB_MAX_CONCURRENCY
@@ -64,6 +66,12 @@ spec:
                 secretKeyRef:
                   name: travel-agent-llm
                   key: TAVILY_API_KEY
+                  optional: true
+            - name: AERODATABOX_RAPIDAPI_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aerodatabox-secret
+                  key: AERODATABOX_RAPIDAPI_KEY
                   optional: true
           readinessProbe:
             httpGet:

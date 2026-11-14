@@ -35,7 +35,7 @@ export function createTripService(repos: Repositories) {
       const trip: Trip = {
         ...input,
         goals: input.goals ?? [],
-        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'local',
+        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'synced',
         ...touchTimestamps(existing),
       }
       await repos.trips.put(trip)
@@ -56,7 +56,7 @@ export function createBookingService(repos: Repositories) {
       const existing = await repos.bookings.getById(input.id)
       const booking: Booking = {
         ...input,
-        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'local',
+        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'synced',
         ...touchTimestamps(existing),
       }
       await repos.bookings.put(booking)
@@ -86,7 +86,7 @@ export function createItineraryService(repos: Repositories) {
       const item: ItineraryItem = {
         ...input,
         goalIds: input.goalIds ?? [],
-        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'local',
+        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'synced',
         ...touchTimestamps(existing),
       }
       await repos.itineraryItems.put(item)
@@ -127,7 +127,7 @@ export function createReminderService(repos: Repositories) {
       const existing = await repos.reminders.getById(input.id)
       const reminder = {
         ...input,
-        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'local',
+        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'synced',
         ...touchTimestamps(existing),
       } as Reminder
       await repos.reminders.put(reminder)
@@ -265,7 +265,7 @@ export function createChecklistService(repos: Repositories) {
       const existing = await repos.checklist.getById(input.id)
       const item: ChecklistItem = {
         ...input,
-        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'local',
+        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'synced',
         ...touchTimestamps(existing),
       }
       await repos.checklist.put(item)
@@ -285,7 +285,7 @@ export function createNoteService(repos: Repositories) {
       const existing = await repos.notes.getById(input.id)
       const note: Note = {
         ...input,
-        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'local',
+        syncStatus: input.syncStatus ?? existing?.syncStatus ?? 'synced',
         ...touchTimestamps(existing),
       }
       await repos.notes.put(note)

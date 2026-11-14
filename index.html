@@ -9,6 +9,8 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <meta name="theme-color" content="#1a3a4a" />
+    <meta name="color-scheme" content="only light" />
+    <meta name="darkreader-lock" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -18,6 +20,14 @@
       content="Tool4Trip — organizador personal de viajes, offline first."
     />
     <title>Tool4Trip</title>
+    <script>
+      try {
+        if (localStorage.getItem('tool4trip-theme') === 'dark') {
+          document.documentElement.dataset.theme = 'dark'
+          document.querySelector('meta[name="color-scheme"]').setAttribute('content', 'only dark')
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

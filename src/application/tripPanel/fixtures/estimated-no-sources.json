@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "packageId": "fixture-estimated-no-sources",
+  "revision": 1,
+  "trip": {
+    "id": "trip-est-1",
+    "title": "Esqueleto estimado",
+    "destination": "Pueblo",
+    "startDate": "2026-09-19",
+    "endDate": "2026-09-22",
+    "timezone": "America/Mexico_City",
+    "goals": [],
+    "status": "planned"
+  },
+  "travelOptions": [
+    {
+      "externalId": "flt-out",
+      "type": "flight",
+      "status": "researched",
+      "title": "MEX → GDL estimado",
+      "origin": "MEX",
+      "destination": "GDL",
+      "startAt": "2026-09-19T10:00:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "agent"
+    },
+    {
+      "externalId": "flt-ret",
+      "type": "flight",
+      "status": "researched",
+      "title": "Regreso GDL → MEX estimado",
+      "origin": "GDL",
+      "destination": "MEX",
+      "startAt": "2026-09-22T18:00:00-06:00",
+      "verificationStatus": "estimated",
+      "sourceType": "agent"
+    },
+    {
+      "externalId": "lodge-1",
+      "type": "lodging",
+      "status": "researched",
+      "title": "Hospedaje Pueblo (estimado · 3 noche(s))",
+      "destination": "Pueblo",
+      "verificationStatus": "estimated",
+      "sourceType": "agent"
+    }
+  ],
+  "itineraryItems": [],
+  "checklistItems": [],
+  "notes": []
+}

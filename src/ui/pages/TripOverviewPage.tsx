@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useOutletContext } from 'react-router-dom'
 import { services } from '../../application'
 import {
@@ -7,9 +6,15 @@ import {
   formatShortDate,
   formatTimeUntil,
 } from '../../application/summary'
+import { buildTripPanelFromPersisted } from '../../application/tripPanel'
 import type { ChecklistItem, DocumentMeta, Trip } from '../../domain/types'
 import { DEMO_TRIP_ID } from '../../seed/demoSanMiguel'
 import { useDocumentViewer } from '../documents/useDocumentViewer'
+import { TripPanel } from '../tripPanel'
+import { useCardActions } from '../tripPanel/useCardActions'
+import { useCloudQuery } from '../useCloudQuery'
+import { useReadOnly } from '../useReadOnly'
+import { useLiveQuery } from 'dexie-react-hooks'
 
 const DEMO_DEFAULT_NOW = '2026-09-20T10:00:00-06:00'
 
@@ -32,6 +37,7 @@ export function TripOverviewPage() {
   const { trip } = useOutletContext<{ trip: Trip }>()
   const { open, Viewer } = useDocumentViewer()
   const isDemo = trip.id === DEMO_TRIP_ID
+  const readOnly = useReadOnly()
   const [clockPreset, setClockPreset] = useState<string>(
     isDemo ? DEMO_DEFAULT_NOW : 'real',
   )
@@ -50,10 +56,42 @@ export function TripOverviewPage() {
 
   const now = new Date(nowIso)
 
-  const summary = useLiveQuery(
+  const {
+    data: summary,
+    loading: summaryLoading,
+    error: summaryError,
+    reload: reloadSummary,
+  } = useCloudQuery(
+    `summary:${trip.id}:${nowIso}`,
     () => services.summary.getTripSummary(trip.id, new Date(nowIso)),
-    [trip.id, nowIso],
   )
+
+  const { data: panelBundle, reload: reloadPanel } = useCloudQuery(
+    `trip-panel:${trip.id}`,
+    async () => {
+      const [options, itinerary, checklist, notes, bookings] =
+        await Promise.all([
+          services.travelOptions.listByTrip(trip.id),
+          services.itinerary.listByTrip(trip.id),
+          services.checklist.listByTrip(trip.id),
+          services.notes.listByTrip(trip.id),
+          services.bookings.listByTrip(trip.id),
+        ])
+      return buildTripPanelFromPersisted({
+        trip,
+        options,
+        itinerary,
+        checklist,
+        notes,
+        bookings,
+      })
+    },
+  )
+
+  const { actionError, getActionProps } = useCardActions(trip, () => {
+    reloadPanel()
+    reloadSummary()
+  })
 
   const nextDocs =
     useLiveQuery(async () => {
@@ -66,10 +104,14 @@ export function TripOverviewPage() {
       ...item,
       status: item.status === 'open' ? 'done' : 'open',
     })
+    reloadSummary()
   }
 
-  if (summary === undefined) {
+  if (summaryLoading || summary === undefined) {
     return <p className="muted">Cargando resumen…</p>
+  }
+  if (summaryError) {
+    return <p className="status-bad">{summaryError.message}</p>
   }
   if (summary === null) {
     return <p className="status-bad">No se pudo cargar el resumen.</p>
@@ -104,6 +146,19 @@ export function TripOverviewPage() {
             ))}
           </select>
         </div>
+      )}
+
+      {trip.goals.length > 0 && (
+        <section className="sum-block" aria-labelledby="sum-goals">
+          <h2 id="sum-goals" className="sum-label">
+            Objetivos del viaje
+          </h2>
+          <ul className="goal-list">
+            {trip.goals.map((g) => (
+              <li key={g.id}>{g.label}</li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {current && (
@@ -256,6 +311,7 @@ export function TripOverviewPage() {
                   <input
                     type="checkbox"
                     checked={false}
+                    disabled={readOnly}
                     onChange={() => void toggleCheck(item)}
                   />
                   <span>{item.label}</span>
@@ -265,6 +321,20 @@ export function TripOverviewPage() {
           </ul>
         )}
       </section>
+
+      {actionError && <p className="status-bad">{actionError}</p>}
+
+      {panelBundle && (
+        <section className="tp-plan-block" aria-labelledby="tp-plan">
+          <h2 id="tp-plan">Plan del viaje</h2>
+          <TripPanel
+            model={panelBundle}
+            showEmptySections={false}
+            embedded
+            getActionProps={getActionProps}
+          />
+        </section>
+      )}
 
       {Viewer}
     </section>

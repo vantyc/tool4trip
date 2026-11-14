@@ -1,5 +1,12 @@
 import { z } from 'zod'
 import type { ToolTraceEntry } from '../../shared/agentContracts.ts'
+import {
+  augmentContextWithProvenFlightSchedules,
+  stampProvenScheduleOptions,
+} from '../flights/mergeSchedules.ts'
+import { claimTargetOption, dropUnsupportedPhones } from './entityEvidence.ts'
+import { demoteUnverifiedExternalEventDates } from './eventDateGrounding.ts'
+import { scrubUnsupportedFreeTextAssertions } from './researchCoverage.ts'
 
 /**
  * What the LLM may emit for claims[] (no quotedFact — server-owned).
@@ -163,6 +170,148 @@ export function normalizeEvidenceText(s: string): string {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+const MONTHS_ES = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
+] as const
+
+const MONTHS_EN = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+] as const
+
+function parseIsoDateParts(value: string): {
+  y: string
+  m: string
+  d: string
+  hh?: string
+  mm?: string
+} | null {
+  const dateOnly = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (dateOnly) {
+    return { y: dateOnly[1]!, m: dateOnly[2]!, d: dateOnly[3]! }
+  }
+  const dt = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?/)
+  if (dt) {
+    return {
+      y: dt[1]!,
+      m: dt[2]!,
+      d: dt[3]!,
+      hh: dt[4]!,
+      mm: dt[5]!,
+    }
+  }
+  return null
+}
+
+function statementMentionsCalendarDay(
+  normStmt: string,
+  y: string,
+  m: string,
+  d: string,
+): boolean {
+  const iso = `${y}-${m}-${d}`
+  if (normStmt.includes(iso)) return true
+  if (normStmt.includes(`${d}/${m}/${y}`) || normStmt.includes(`${d}-${m}-${y}`)) {
+    return true
+  }
+  const day = String(Number(d))
+  const monthIdx = Number(m) - 1
+  if (monthIdx < 0 || monthIdx > 11) return false
+  const es = MONTHS_ES[monthIdx]!
+  const en = MONTHS_EN[monthIdx]!
+  // "25 de septiembre de 2026" / "25 de septiembre 2026"
+  if (
+    new RegExp(
+      `\\b${day}\\s+de\\s+${es}(?:\\s+de)?\\s+${y}\\b`,
+    ).test(normStmt)
+  ) {
+    return true
+  }
+  // "septiembre 25, 2026" / "sep 25 2026" / "25 september 2026"
+  if (
+    new RegExp(`\\b${day}\\s+${en}\\s+${y}\\b`).test(normStmt) ||
+    new RegExp(`\\b${en}\\s+${day},?\\s+${y}\\b`).test(normStmt)
+  ) {
+    return true
+  }
+  // abbreviated Spanish "25 sep 2026"
+  const esAbbr = es.slice(0, 3)
+  if (new RegExp(`\\b${day}\\s+${esAbbr}\\.?\\s+${y}\\b`).test(normStmt)) {
+    return true
+  }
+  return false
+}
+
+function statementHasClock(normStmt: string, hh: string, mm: string): boolean {
+  const h = hh.padStart(2, '0')
+  const m = mm.padStart(2, '0')
+  const hNum = String(Number(h))
+  // 11:15 or 11.15 ; allow unpadded hour
+  return (
+    normStmt.includes(`${h}:${m}`) ||
+    normStmt.includes(`${h}.${m}`) ||
+    normStmt.includes(`${hNum}:${m}`) ||
+    normStmt.includes(`${hNum}.${m}`)
+  )
+}
+
+/**
+ * Context claim statements may paraphrase field values (esp. ISO datetimes /
+ * dates as "25 de septiembre … 11:15"). Still require the statement to refer to
+ * the same calendar day (and clock when the field has one) — contradictions fail.
+ */
+export function statementIncludesContextValue(
+  statement: string,
+  fieldValue: string,
+): boolean {
+  const normStmt = normalizeEvidenceText(statement)
+  const normVal = normalizeEvidenceText(fieldValue)
+  if (!normVal) return true
+  if (normStmt.includes(normVal)) return true
+
+  const parts = parseIsoDateParts(fieldValue.trim())
+  if (parts) {
+    const dayOk = statementMentionsCalendarDay(
+      normStmt,
+      parts.y,
+      parts.m,
+      parts.d,
+    )
+    if (!dayOk) return false
+    if (parts.hh != null && parts.mm != null) {
+      return statementHasClock(normStmt, parts.hh, parts.mm)
+    }
+    return true
+  }
+
+  // Legacy short-prefix for non-ISO tokens (ids, titles, codes)
+  if (normVal.length >= 10 && normStmt.includes(normVal.slice(0, 10))) return true
+  return false
 }
 
 /** Flatten toolTrace sources that match url (order preserved). */
@@ -350,16 +499,15 @@ function numbersCovered(statementNums: string[], quotedNums: string[]): boolean 
   return statementNums.every((n) => q.has(n))
 }
 
+/** Same word family only (vuelos ≈ vuelo ≈ flight); a different mode never covers. */
 function modesCovered(statementModes: string[], quotedModes: string[]): boolean {
   if (statementModes.length === 0) return true
-  const q = new Set(quotedModes.map((m) => normalizeEvidenceText(m)))
-  return statementModes.every((m) => q.has(normalizeEvidenceText(m)))
+  return statementModes.every((m) => quotedModes.some((q) => modesEquivalent(m, q)))
 }
 
 function statusCovered(statementStatus: string[], quotedStatus: string[]): boolean {
   if (statementStatus.length === 0) return true
-  const q = new Set(quotedStatus.map((m) => normalizeEvidenceText(m)))
-  return statementStatus.every((m) => q.has(normalizeEvidenceText(m)))
+  return statementStatus.every((m) => quotedStatus.some((q) => statusEquivalent(m, q)))
 }
 
 /** Strip LLM-supplied quotedFact/sourceTitle (server owns them). */
@@ -429,10 +577,15 @@ function resolveContextField(
       message: `unknown entityType ${entityType}`,
     }
   }
+  // Match primary entity id OR package externalId — LLMs often cite either.
+  // Preferring only externalId broke grounding after cloud SoT (ids look like
+  // opt-{packageId}-{externalId} while externalId stays short).
   const hit = list.find((item) => {
+    if (entityId == null) return false
     const r = item as Record<string, unknown>
-    const id = String(r.externalId ?? r.id ?? '')
-    return entityId != null && id === entityId
+    const primary = r.id != null ? String(r.id) : ''
+    const external = r.externalId != null ? String(r.externalId) : ''
+    return entityId === primary || entityId === external
   }) as Record<string, unknown> | undefined
   if (!hit) {
     return {
@@ -456,6 +609,72 @@ function resolveContextField(
   }
 }
 
+/** User asked for flights on a concrete calendar day (not "in September" generally). */
+export function isDaySpecificFlightAsk(prompt: string): boolean {
+  const p = prompt
+    .normalize('NFKC')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+  if (!/\bvuelo|\bvuelos|\bflight|\bflights\b/.test(p)) return false
+  // day + month, or ISO date, or "este 15 de septiembre"
+  return (
+    /\b\d{1,2}\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/.test(
+      p,
+    ) ||
+    /\b\d{4}-\d{2}-\d{2}\b/.test(p) ||
+    /\bel\s+\d{1,2}\b/.test(p) ||
+    /\beste\s+\d{1,2}\b/.test(p)
+  )
+}
+
+/** Aggregate route frequency — does not answer a day-specific flight ask. */
+export function isAggregateFlightFrequencyText(text: string): boolean {
+  const t = text
+    .normalize('NFKC')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+  if (!/\bvuelo|\bvuelos|\bflight|\bflights\b/.test(t)) return false
+  return (
+    /por\s+semana|a\s+la\s+semana|semanales|weekly/.test(t) ||
+    /por\s+mes|al\s+mes|mensuales|monthly/.test(t) ||
+    /por\s+ano|al\s+ano|anuales|yearly|per\s+year/.test(t) ||
+    /\d+\s+vuelos\s+(por|a\s+la)\s+(semana|mes|ano)/.test(t)
+  )
+}
+
+/**
+ * Drop claims that answer a day-specific flight ask with weekly/monthly aggregates.
+ * Soft-omit (do not fail the whole proposal) — wrong stats must not surface as evidence.
+ */
+export function filterAggregateFlightClaims(
+  claims: AgentClaimDraft[],
+  userPrompt: string | undefined,
+): { kept: AgentClaimDraft[]; warnings: string[] } {
+  if (!userPrompt || !isDaySpecificFlightAsk(userPrompt)) {
+    return { kept: claims, warnings: [] }
+  }
+  const kept: AgentClaimDraft[] = []
+  const warnings: string[] = []
+  for (const c of claims) {
+    const blob = `${c.statement} ${c.quotedFact}`
+    if (isAggregateFlightFrequencyText(blob)) {
+      warnings.push(
+        `server: omitido agregado temporal (no responde a la fecha pedida): ${c.statement}`,
+      )
+      continue
+    }
+    kept.push(c)
+  }
+  if (warnings.length > 0 && kept.length === 0) {
+    warnings.push(
+      'server: no hay evidencia de vuelos/horarios para la fecha pedida en las fuentes consultadas.',
+    )
+  }
+  return { kept, warnings }
+}
+
 /**
  * Attach server-owned evidence, then validate statement against that literal text.
  */
@@ -469,9 +688,15 @@ export function validateClaimsAgainstToolTrace(
 
   llmClaims.forEach((llmClaim, index) => {
     const sourceType = llmClaim.sourceType ?? 'web'
+    const hasContextKeys =
+      Boolean(llmClaim.entityType) && Boolean(llmClaim.field)
 
-    if (sourceType === 'context') {
-      if (!context) {
+    // Context path (explicit), or web claim that also cites a resolvable
+    // context field whose value the statement actually refers to. Lets
+    // schedule-backed options ground natural Spanish without requiring the
+    // LLM to pick sourceType=context — without accepting contradictions.
+    if (sourceType === 'context' || (sourceType === 'web' && hasContextKeys && context)) {
+      if (sourceType === 'context' && !context) {
         invalid.push({
           index,
           claim: llmClaim,
@@ -480,44 +705,55 @@ export function validateClaimsAgainstToolTrace(
         })
         return
       }
-      const resolved = resolveContextField(
-        context,
-        llmClaim.entityType!,
-        llmClaim.entityId,
-        llmClaim.field!,
-      )
-      if (!resolved.ok) {
+      if (context && hasContextKeys) {
+        const resolved = resolveContextField(
+          context,
+          llmClaim.entityType!,
+          llmClaim.entityId,
+          llmClaim.field!,
+        )
+        if (resolved.ok) {
+          const claim: AgentClaimDraft = {
+            ...llmClaim,
+            sourceType: 'context',
+            sourceUrl: null,
+            evidenceIndex: 0,
+            sourceTitle: resolved.title,
+            quotedFact: resolved.value.slice(0, 800),
+          }
+          if (statementIncludesContextValue(claim.statement, claim.quotedFact)) {
+            valid.push(claim)
+            return
+          }
+          if (sourceType === 'context') {
+            invalid.push({
+              index,
+              claim,
+              code: 'context_statement_mismatch',
+              message: 'statement does not include context field value',
+            })
+            return
+          }
+          // web + entity cite that contradicts context → try web evidence instead
+        } else if (sourceType === 'context') {
+          invalid.push({
+            index,
+            claim: llmClaim,
+            code: resolved.code,
+            message: resolved.message,
+          })
+          return
+        }
+        // web + missing entity → fall through to web provenance
+      } else if (sourceType === 'context') {
         invalid.push({
           index,
           claim: llmClaim,
-          code: resolved.code,
-          message: resolved.message,
+          code: 'context_entity_missing',
+          message: 'context claim missing entityType/field',
         })
         return
       }
-      const claim: AgentClaimDraft = {
-        ...llmClaim,
-        sourceType: 'context',
-        sourceUrl: null,
-        evidenceIndex: 0,
-        sourceTitle: resolved.title,
-        quotedFact: resolved.value.slice(0, 800),
-      }
-      // Context facts: statement should mention the field value (normalized containment)
-      const normStmt = normalizeEvidenceText(claim.statement)
-      const normVal = normalizeEvidenceText(claim.quotedFact)
-      if (normVal && !normStmt.includes(normVal) && !normStmt.includes(normVal.slice(0, 10))) {
-        // allow pretty-printed dates: if quotedFact is YYYY-MM-DD, also accept if statement has it
-        invalid.push({
-          index,
-          claim,
-          code: 'context_statement_mismatch',
-          message: 'statement does not include context field value',
-        })
-        return
-      }
-      valid.push(claim)
-      return
     }
 
     // --- web provenance ---
@@ -597,7 +833,7 @@ export function validateClaimsAgainstToolTrace(
         index,
         claim,
         code: 'status_ungrounded',
-        message: `status word in statement not explicit in evidence: [${stmtStatus.join(',')}]; "0 salidas" does not imply suspensión`,
+        message: `status word in statement not explicit in evidence: [${stmtStatus.join(',')}]${stmtStatus.some((w) => /suspend|cancel/.test(w)) ? '; "0 salidas" does not imply suspensión' : ''}`,
       })
       return
     }
@@ -716,6 +952,45 @@ export function extractOperationalSignals(
   return signals
 }
 
+const MODE_EQUIV_GROUPS: readonly (readonly string[])[] = [
+  ['vuelo', 'vuelos', 'flight', 'flights'],
+  ['autobus', 'autobús', 'bus'],
+  ['tren', 'train'],
+  ['transfer', 'traslado'],
+]
+
+function modesEquivalent(a: string, b: string): boolean {
+  const na = normalizeEvidenceText(a)
+  const nb = normalizeEvidenceText(b)
+  if (na === nb) return true
+  return MODE_EQUIV_GROUPS.some((g) => g.includes(na) && g.includes(nb))
+}
+
+const STATUS_EQUIV_GROUPS: readonly (readonly string[])[] = [
+  [
+    'confirmado',
+    'confirmada',
+    'confirmados',
+    'confirmadas',
+  ],
+  [
+    'suspendido',
+    'suspendida',
+    'suspendidos',
+    'suspendidas',
+    'suspensión',
+    'suspension',
+  ],
+  ['cancelado', 'cancelada', 'cancelados', 'canceladas'],
+]
+
+function statusEquivalent(a: string, b: string): boolean {
+  const na = normalizeEvidenceText(a)
+  const nb = normalizeEvidenceText(b)
+  if (na === nb) return true
+  return STATUS_EQUIV_GROUPS.some((g) => g.includes(na) && g.includes(nb))
+}
+
 function claimCoversSignal(
   claim: AgentClaimDraft,
   signal: OperationalSignal,
@@ -723,14 +998,12 @@ function claimCoversSignal(
   const stmt = `${claim.statement} ${claim.quotedFact}`
   if (signal.kind === 'transport_mode') {
     const modes = extractTransportModes(stmt)
-    return signal.modes.every((m) =>
-      modes.some((cm) => normalizeEvidenceText(cm) === normalizeEvidenceText(m)),
-    )
+    return signal.modes.every((m) => modes.some((cm) => modesEquivalent(cm, m)))
   }
   if (signal.kind === 'service_status') {
     const st = extractStatusWords(stmt)
     return signal.statusWords.every((m) =>
-      st.some((cm) => normalizeEvidenceText(cm) === normalizeEvidenceText(m)),
+      st.some((cm) => statusEquivalent(cm, m)),
     )
   }
   if (signal.kind === 'price' || signal.kind === 'currency') {
@@ -761,12 +1034,36 @@ function claimCoversSignal(
   return false
 }
 
-
 function collectPackageTexts(pkg: unknown): { where: string; text: string }[] {
   const out: { where: string; text: string }[] = []
+  // Identifiers / enums / URLs are not narrative operational assertions
+  // (e.g. externalId "outbound-flight-1" must not flag transport_mode:flight).
+  const SKIP_KEYS = new Set([
+    'id',
+    'externalId',
+    'tripId',
+    'packageId',
+    'sourceUrl',
+    'sourceType',
+    'type',
+    'status',
+    'verificationStatus',
+    'checkedAt',
+    'startAt',
+    'endAt',
+    'startDate',
+    'endDate',
+    'dueAt',
+    'generatedAt',
+    'timezone',
+    'origin',
+    'destination',
+    'schemaVersion',
+  ])
   const p = pkg && typeof pkg === 'object' ? (pkg as Record<string, unknown>) : {}
   const addObj = (prefix: string, o: Record<string, unknown>) => {
     for (const [k, v] of Object.entries(o)) {
+      if (SKIP_KEYS.has(k)) continue
       if (typeof v === 'string' && v.trim()) out.push({ where: `${prefix}.${k}`, text: v })
       if (typeof v === 'number' && Number.isFinite(v)) {
         out.push({ where: `${prefix}.${k}`, text: String(v) })
@@ -831,7 +1128,15 @@ export function scrubOperationalFreeText(text: string): string {
     if (extractOperationalSignals(p, 'scrub').length > 0) continue
     kept.push(p)
   }
-  return kept.join(' ').replace(/\s+/g, ' ').trim()
+  // The residual scan reads the whole text: a mode word gains price context from
+  // numbers in another kept sentence, so drop sentences carrying such modes too.
+  const crossModes = extractOperationalSignals(kept.join(' '), 'scrub').flatMap((s) => s.modes)
+  const out = crossModes.length
+    ? kept.filter(
+        (p) => !extractTransportModes(p).some((m) => crossModes.some((c) => modesEquivalent(m, c))),
+      )
+    : kept
+  return out.join(' ').replace(/\s+/g, ' ').trim()
 }
 
 function symbolToIso(sym: string): string | undefined {
@@ -928,6 +1233,22 @@ export function applyClaimsSourceOfTruth(
     draft.package && typeof draft.package === 'object'
       ? ({ ...(draft.package as Record<string, unknown>) } as Record<string, unknown>)
       : {}
+  if (pkg.trip && typeof pkg.trip === 'object') {
+    const trip = { ...(pkg.trip as Record<string, unknown>) }
+    for (const k of ['notes', 'title', 'goals'] as const) {
+      if (typeof trip[k] === 'string') {
+        trip[k] = scrubOperationalFreeText(trip[k] as string) || undefined
+      }
+      if (Array.isArray(trip[k])) {
+        trip[k] = (trip[k] as unknown[])
+          .map((g) =>
+            typeof g === 'string' ? scrubOperationalFreeText(g) || undefined : g,
+          )
+          .filter((g) => g != null && g !== '')
+      }
+    }
+    pkg.trip = trip
+  }
   const options = Array.isArray(pkg.travelOptions)
     ? pkg.travelOptions.map((o) =>
         o && typeof o === 'object' ? { ...(o as Record<string, unknown>) } : o,
@@ -950,15 +1271,15 @@ export function applyClaimsSourceOfTruth(
   }
 
   const priceClaims = validClaims.filter((c) => c.kind === 'price')
-  priceClaims.forEach((claim, i) => {
+  priceClaims.forEach((claim) => {
     const fields = priceFieldsFromClaim(claim)
     if (!fields) return
-    const target =
-      (options[i] as Record<string, unknown> | undefined) ||
-      (options[0] as Record<string, unknown> | undefined)
+    const target = claimTargetOption(claim, options)
     if (!target) return
     target.priceObserved = fields.priceObserved
     target.currency = fields.currency
+    // Provenance for the scrub gate: grounded price claim ⇒ verified.
+    target.verificationStatus = 'verified'
     target.notes = appendNote(
       target.notes,
       `Precio observado (claim): ${fields.literal}`,
@@ -968,13 +1289,11 @@ export function applyClaimsSourceOfTruth(
     }
   })
 
-  // Re-attach non-price claim statements as notes on first option when present
-  const otherClaims = validClaims.filter((c) => c.kind !== 'price')
-  if (otherClaims.length && options[0] && typeof options[0] === 'object') {
-    const t0 = options[0] as Record<string, unknown>
-    for (const c of otherClaims) {
-      t0.notes = appendNote(t0.notes, `Hecho (${c.kind}): ${c.statement}`)
-    }
+  // Unlinked claims stay only in the evidence warnings above.
+  for (const c of validClaims) {
+    if (c.kind === 'price') continue
+    const target = claimTargetOption(c, options)
+    if (target) target.notes = appendNote(target.notes, `Hecho (${c.kind}): ${c.statement}`)
   }
 
   pkg.travelOptions = options
@@ -996,7 +1315,136 @@ export function applyClaimsSourceOfTruth(
   }
 
   draft.package = pkg
+  // After claim rewrite, still drop inventable clocks/prices without provenance
+  // (price claims already re-applied above; this strips leftover LLM schedules).
+  const concreteWarnings = scrubUngroundedConcreteFields(draft)
+  serverWarnings.push(...concreteWarnings)
   return { draft, serverWarnings }
+}
+
+/**
+ * Provenance gate for inventable concrete facts (price, clock schedule).
+ * - Schedule clocks require verified + https sourceUrl.
+ * - Prices also accept claim-rewritten verified rows (note marker) when URL-less context claims apply.
+ */
+export function hasScheduleProvenance(rec: Record<string, unknown>): boolean {
+  const status = typeof rec.verificationStatus === 'string' ? rec.verificationStatus : ''
+  const url = typeof rec.sourceUrl === 'string' ? rec.sourceUrl.trim() : ''
+  if (!/^https?:\/\//i.test(url)) return false
+  // Published schedule API: clocks allowed with estimated + flight_schedule
+  // (NOT availability/fare — still never treat as verified booking).
+  if (
+    status === 'estimated' &&
+    String(rec.sourceType ?? '') === 'flight_schedule'
+  ) {
+    return true
+  }
+  return status === 'verified'
+}
+
+export function hasPriceProvenance(rec: Record<string, unknown>): boolean {
+  if (hasScheduleProvenance(rec)) return true
+  const status = typeof rec.verificationStatus === 'string' ? rec.verificationStatus : ''
+  if (status !== 'verified') return false
+  const notes = typeof rec.notes === 'string' ? rec.notes : ''
+  return /Precio observado \(claim\):/.test(notes)
+}
+
+/** @deprecated use hasScheduleProvenance / hasPriceProvenance */
+export function hasConcreteProvenance(rec: Record<string, unknown>): boolean {
+  return hasScheduleProvenance(rec)
+}
+
+function datePrefixFromIso(iso: unknown): string | undefined {
+  if (typeof iso !== 'string') return undefined
+  const m = iso.match(/^(\d{4}-\d{2}-\d{2})/)
+  return m?.[1]
+}
+
+/**
+ * Strip inventable concrete fields (priceObserved, currency, startAt, endAt)
+ * when the option/item lacks provenance.
+ * General rule for ESTIMADO/unverified — not a per-value patch.
+ * Returns server warning strings describing what was removed.
+ *
+ * @param opts.scrubItineraryClocks — also strip clocks from non-airport itinerary
+ *   rows (use for new_travel skeleton; leave false for mutation/research so
+ *   context-echoed itinerary times are preserved).
+ */
+export function scrubUngroundedConcreteFields(
+  draft: Record<string, unknown>,
+  opts?: { scrubItineraryClocks?: boolean },
+): string[] {
+  const warnings: string[] = []
+  const pkg =
+    draft.package && typeof draft.package === 'object'
+      ? (draft.package as Record<string, unknown>)
+      : null
+  if (!pkg) return warnings
+
+  const scrubOption = (raw: unknown, where: string) => {
+    if (!raw || typeof raw !== 'object') return raw
+    const rec = { ...(raw as Record<string, unknown>) }
+
+    const title =
+      typeof rec.title === 'string' && rec.title.trim()
+        ? rec.title.trim()
+        : where
+
+    if (
+      !hasPriceProvenance(rec) &&
+      (typeof rec.priceObserved === 'number' || typeof rec.currency === 'string')
+    ) {
+      delete rec.priceObserved
+      delete rec.currency
+      warnings.push(
+        `server: precio sin provenance eliminado de «${title}» (requerido verified+sourceUrl).`,
+      )
+    }
+
+    if (!hasScheduleProvenance(rec)) {
+      const hadStart = typeof rec.startAt === 'string' && rec.startAt.trim()
+      const hadEnd = typeof rec.endAt === 'string' && rec.endAt.trim()
+      if (hadStart || hadEnd) {
+        const dateHint =
+          datePrefixFromIso(rec.startAt) || datePrefixFromIso(rec.endAt)
+        delete rec.startAt
+        delete rec.endAt
+        if (dateHint && typeof rec.notes === 'string') {
+          if (!/fecha (objetivo|asociada):/i.test(rec.notes)) {
+            rec.notes = `${rec.notes}\nFecha asociada (sin hora verificada): ${dateHint}`
+          }
+        } else if (dateHint) {
+          rec.notes = `Fecha asociada (sin hora verificada): ${dateHint}`
+        }
+        warnings.push(
+          `server: horario concreto sin provenance eliminado de «${title}» (requerido verified+sourceUrl).`,
+        )
+      }
+    }
+
+    return rec
+  }
+
+  if (Array.isArray(pkg.travelOptions)) {
+    pkg.travelOptions = pkg.travelOptions.map((o, i) =>
+      scrubOption(o, `travelOptions[${i}]`),
+    )
+  }
+
+  if (opts?.scrubItineraryClocks && Array.isArray(pkg.itineraryItems)) {
+    pkg.itineraryItems = pkg.itineraryItems.map((item, i) => {
+      if (!item || typeof item !== 'object') return item
+      const rec = item as Record<string, unknown>
+      const id = typeof rec.externalId === 'string' ? rec.externalId : ''
+      // Server-authored airport arrivals are policy-derived; keep their clocks.
+      if (id.startsWith('airport-arrival-')) return item
+      return scrubOption(item, `itineraryItems[${i}]`)
+    })
+  }
+
+  draft.package = pkg
+  return warnings
 }
 
 function collectAllOperationalSignals(
@@ -1045,6 +1493,7 @@ export function assertDraftGrounded(
   draftIn: Record<string, unknown>,
   toolTrace: ToolTraceEntry[],
   context?: import('../../shared/agentContracts.ts').TripContextSnapshot,
+  opts?: { allowSkeletonPackage?: boolean; userPrompt?: string },
 ): GroundingResult {
   const draft = structuredClone(draftIn) as Record<string, unknown>
   const rawClaims = draft.claims
@@ -1086,35 +1535,125 @@ export function assertDraftGrounded(
     const warnings = parseViolations.map(
       (v) => `server: claim[${v.index}] inválido — ${v.message}`,
     )
-    return {
-      ok: false,
-      code: 'ungrounded_claims',
-      message: `ungrounded_claims: ${parseViolations.length} claim(s) failed schema`,
-      warnings,
-      violations: parseViolations,
-      uncoveredSignals: [],
+    // new_travel skeleton: drop schema-invalid claims; continue with any
+    // that parsed (none here if all invalid).
+    if (opts?.allowSkeletonPackage) {
+      draft.claims = llmClaims
+      // fall through to validate remaining (possibly empty) claims
+    } else {
+      return {
+        ok: false,
+        code: 'ungrounded_claims',
+        message: `ungrounded_claims: ${parseViolations.length} claim(s) failed schema`,
+        warnings,
+        violations: parseViolations,
+        uncoveredSignals: [],
+      }
     }
   }
 
-  const { valid, invalid } = validateClaimsAgainstToolTrace(
+  // Register schedule-backed package flights into grounding context BEFORE
+  // validating context claims (Ask Travel: options exist in package but not
+  // yet in Dexie TripContextSnapshot). Fabricated flights without toolTrace
+  // schedule evidence are NOT registered.
+  const stampWarnings: string[] = []
+  if (draft.package && typeof draft.package === 'object') {
+    const stamped = stampProvenScheduleOptions(draft.package, toolTrace)
+    draft.package = stamped.package
+    if (stamped.stampedExternalIds.length) {
+      stampWarnings.push(
+        `server: ${stamped.stampedExternalIds.length} travelOption(s) stamped flight_schedule from searchFlightSchedules (${stamped.stampedExternalIds.join(', ')}).`,
+      )
+    }
+    stampWarnings.push(...dropUnsupportedPhones(draft.package, toolTrace))
+  }
+  const groundingContext = augmentContextWithProvenFlightSchedules(
+    context,
+    draft.package,
+    toolTrace,
+  )
+
+  const { valid: validated, invalid } = validateClaimsAgainstToolTrace(
     llmClaims,
     toolTrace,
-    context,
+    groundingContext,
   )
-  if (invalid.length) {
-    const warnings = invalid.map(
-      (v) =>
-        `server: claim[${v.index}] no grounded (${v.code}) — ${v.message}`,
-    )
+  if (invalid.length || (parseViolations.length && opts?.allowSkeletonPackage)) {
+    const warnings = [
+      ...parseViolations.map(
+        (v) => `server: claim[${v.index}] inválido — ${v.message}`,
+      ),
+      ...invalid.map(
+        (v) =>
+          `server: claim[${v.index}] no grounded (${v.code}) — ${v.message}`,
+      ),
+    ]
+    // new_travel skeleton: drop ungrounded/invalid claims and continue (same as
+    // emitting no claims). Do NOT fail the whole job — verified rules still
+    // apply to any claim that remains.
+    if (opts?.allowSkeletonPackage) {
+      const filtered = filterAggregateFlightClaims(validated, opts?.userPrompt)
+      const valid = filtered.kept
+      draft.claims = valid
+      const concreteWarnings = scrubUngroundedConcreteFields(draft, {
+        scrubItineraryClocks: true,
+      })
+      const eventDateWarnings = demoteUnverifiedExternalEventDates(
+        draft,
+        toolTrace,
+        groundingContext,
+      )
+      const freeTextWarnings = scrubUnsupportedFreeTextAssertions(
+        draft,
+        toolTrace,
+      )
+      if (!Array.isArray(draft.warnings)) draft.warnings = []
+      if (!Array.isArray(draft.ops)) draft.ops = []
+      const prev = (draft.warnings as unknown[]).filter(
+        (w): w is string => typeof w === 'string' && w.trim().length > 0,
+      )
+      const dropped = invalid.length + parseViolations.length
+      const dropNote = `server: ${dropped} claim(s) descartado(s) por grounding (skeleton); no se promocionan a verified.`
+      draft.warnings = [
+        ...prev,
+        ...stampWarnings,
+        dropNote,
+        ...warnings,
+        ...concreteWarnings,
+        ...eventDateWarnings,
+        ...freeTextWarnings,
+      ]
+      return {
+        ok: true,
+        validClaims: valid,
+        serverWarnings: [
+          ...stampWarnings,
+          ...filtered.warnings,
+          dropNote,
+          ...warnings,
+          ...concreteWarnings,
+          ...eventDateWarnings,
+          ...freeTextWarnings,
+        ],
+        draft,
+      }
+    }
     return {
       ok: false,
       code: 'ungrounded_claims',
       message: `ungrounded_claims: ${invalid.map((v) => v.code).join(', ')}`,
-      warnings,
+      warnings: invalid.map(
+        (v) =>
+          `server: claim[${v.index}] no grounded (${v.code}) — ${v.message}`,
+      ),
       violations: invalid,
       uncoveredSignals: [],
     }
   }
+
+  const filtered = filterAggregateFlightClaims(validated, opts?.userPrompt)
+  const valid = filtered.kept
+  const aggregateWarnings = filtered.warnings
 
   // Context-only read answers: Dexie/history is INPUT, not agent-authored output.
   // Do not rewrite package from claims, inject evidencia warnings, or residual-scan
@@ -1128,7 +1667,49 @@ export function assertDraftGrounded(
     return {
       ok: true,
       validClaims: valid,
-      serverWarnings: [],
+      serverWarnings: [...stampWarnings, ...aggregateWarnings],
+      draft,
+    }
+  }
+
+  // new_travel skeleton: web claims still fail-closed above; estimated
+  // flight/hotel package fields skip residual SoT scan — but never keep
+  // inventable concrete price/schedule without verified+sourceUrl provenance.
+  if (opts?.allowSkeletonPackage) {
+    const concreteWarnings = scrubUngroundedConcreteFields(draft, {
+      scrubItineraryClocks: true,
+    })
+    const eventDateWarnings = demoteUnverifiedExternalEventDates(
+      draft,
+      toolTrace,
+      groundingContext,
+    )
+    const freeTextWarnings = scrubUnsupportedFreeTextAssertions(
+      draft,
+      toolTrace,
+    )
+    if (!Array.isArray(draft.warnings)) draft.warnings = []
+    if (!Array.isArray(draft.ops)) draft.ops = []
+    const prev = (draft.warnings as unknown[]).filter(
+      (w): w is string => typeof w === 'string' && w.trim().length > 0,
+    )
+    draft.warnings = [
+      ...prev,
+      ...stampWarnings,
+      ...concreteWarnings,
+      ...eventDateWarnings,
+      ...freeTextWarnings,
+    ]
+    return {
+      ok: true,
+      validClaims: valid,
+      serverWarnings: [
+        ...stampWarnings,
+        ...aggregateWarnings,
+        ...concreteWarnings,
+        ...eventDateWarnings,
+        ...freeTextWarnings,
+      ],
       draft,
     }
   }
@@ -1137,11 +1718,22 @@ export function assertDraftGrounded(
     draft,
     valid,
   )
+  const eventDateWarnings = demoteUnverifiedExternalEventDates(
+    rewritten,
+    toolTrace,
+    groundingContext,
+  )
+  const allServerWarnings = [
+    ...stampWarnings,
+    ...aggregateWarnings,
+    ...serverWarnings,
+    ...eventDateWarnings,
+  ]
 
   const signals = collectAllOperationalSignals(rewritten)
-  const uncovered = signals.filter((sig) => {
-    return !valid.some((claim) => claimCoversSignal(claim, sig))
-  })
+  const uncovered = signals.filter(
+    (sig) => !valid.some((claim) => claimCoversSignal(claim, sig)),
+  )
 
   if (uncovered.length) {
     const warnings = uncovered.map(
@@ -1158,10 +1750,20 @@ export function assertDraftGrounded(
     }
   }
 
+  // Surface honest "no day-specific evidence" warnings in the proposal UI.
+  if (allServerWarnings.length) {
+    const prev = Array.isArray(rewritten.warnings)
+      ? (rewritten.warnings as unknown[]).filter(
+          (w): w is string => typeof w === 'string',
+        )
+      : []
+    rewritten.warnings = [...prev, ...allServerWarnings]
+  }
+
   return {
     ok: true,
     validClaims: valid,
-    serverWarnings,
+    serverWarnings: allServerWarnings,
     draft: rewritten,
   }
 }

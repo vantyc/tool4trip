@@ -8,17 +8,20 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "validate": "tsx scripts/validate-resolution.ts"
+    "validate": "tsx scripts/validate-resolution.ts",
+    "test:unit": "tsx --test src/application/*.test.ts src/application/tripPanel/*.test.ts src/application/tripBoard/*.test.ts src/application/packageImport.planImport.test.ts"
   },
   "dependencies": {
     "dexie": "^4.2.1",
     "dexie-react-hooks": "^4.4.0",
+    "leaflet": "^1.9.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.9.4",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

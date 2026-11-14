@@ -1,0 +1,1064 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+import type { AgentOpRecord } from '../../shared/agentContracts.ts'
+import { compileMutationPlan, mergePreservedPackageOption, normalizeHintExternalId } from './compileMutationPlan.ts'
+import { applyMutationInMemory } from './packageMutation.ts'
+import { optionEntityId } from './tripPackage.ts'
+import type { TravelOption } from './domainTypes.ts'
+import type { TripPackageV1 } from './tripPackage.ts'
+
+const TRIP_ID = 'bd4d0e9a-b5df-4dbc-bb7e-ce6f869aae28'
+const PKG_ID = TRIP_ID
+
+const am222Url =
+  'https://aerodatabox.com/?origin=MEX&destination=GDL&date=2026-09-25&flight=AM222'
+const y4141Url =
+  'https://aerodatabox.com/?origin=GDL&destination=MEX&date=2026-09-28&flight=Y4141'
+
+function opt(
+  externalId: string,
+  partial: Partial<TravelOption> &
+    Pick<TravelOption, 'title' | 'type'> & { startAt?: string },
+): TravelOption {
+  return {
+    id: optionEntityId(PKG_ID, externalId),
+    tripId: TRIP_ID,
+    status: 'shortlisted',
+    sourceType: 'agent',
+    externalId,
+    packageId: PKG_ID,
+    createdAt: '2026-09-19T00:00:00.000Z',
+    updatedAt: '2026-09-19T00:00:00.000Z',
+    syncStatus: 'synced',
+    ...partial,
+  }
+}
+
+function currentState(): TravelOption[] {
+  return [
+    opt('outbound-flight-1', {
+      type: 'flight',
+      title: 'Vuelo MEX→GDL 20',
+      origin: 'MEX',
+      destination: 'GDL',
+      startAt: '2026-09-20T07:00:00-06:00',
+      status: 'shortlisted',
+    }),
+    opt('return-flight-1', {
+      type: 'flight',
+      title: 'Vuelo GDL→MEX 22',
+      origin: 'GDL',
+      destination: 'MEX',
+      startAt: '2026-09-22T12:00:00-06:00',
+      status: 'shortlisted',
+    }),
+    opt('return-flight-2', {
+      type: 'flight',
+      title: 'Vuelo GDL→MEX 21 alternativa',
+      origin: 'GDL',
+      destination: 'MEX',
+      startAt: '2026-09-21T12:00:00-06:00',
+      status: 'researched',
+    }),
+    opt('lodge-skeleton-1', {
+      type: 'lodging',
+      title: 'Hospedaje San Miguel el Alto',
+      startAt: '2026-09-19T15:00:00-06:00',
+      endAt: '2026-09-22T12:00:00-06:00',
+      status: 'researched',
+    }),
+    opt('ground-transfer-1', {
+      type: 'transfer',
+      title: 'Traslado Guadalajara → San Miguel el Alto',
+      status: 'researched',
+    }),
+  ]
+}
+
+function basePkg(
+  travelOptions: TripPackageV1['travelOptions'],
+): TripPackageV1 {
+  return {
+    schemaVersion: 1,
+    packageId: PKG_ID,
+    revision: 2,
+    generatedAt: '2026-09-20T06:00:00Z',
+    trip: {
+      id: TRIP_ID,
+      title: 'SMA',
+      destination: 'San Miguel el Alto, Jalisco',
+      startDate: '2026-09-25',
+      endDate: '2026-09-28',
+      timezone: 'America/Mexico_City',
+      goals: [],
+      status: 'planned',
+    },
+    travelOptions,
+    itineraryItems: [],
+    checklistItems: [],
+    notes: [],
+  }
+}
+
+/** RUN A proposed package (new flight ids + primary lodge + GDL fallback) */
+function proposedRunA(): TripPackageV1 {
+  return basePkg([
+    {
+      externalId: 'outbound-flight-2',
+      type: 'flight',
+      status: 'shortlisted',
+      title: 'AM222 MEX→GDL 25',
+      origin: 'MEX',
+      destination: 'GDL',
+      startAt: '2026-09-25T11:15:00-06:00',
+      endAt: '2026-09-25T12:52:00-06:00',
+      sourceType: 'flight_schedule',
+      sourceUrl: am222Url,
+      provider: 'Aeromexico',
+      verificationStatus: 'estimated',
+    },
+    {
+      externalId: 'return-flight-3',
+      type: 'flight',
+      status: 'shortlisted',
+      title: 'Y4141 GDL→MEX 28',
+      origin: 'GDL',
+      destination: 'MEX',
+      startAt: '2026-09-28T08:22:00-06:00',
+      endAt: '2026-09-28T09:45:00-06:00',
+      sourceType: 'flight_schedule',
+      sourceUrl: y4141Url,
+      provider: 'Volaris',
+      verificationStatus: 'estimated',
+    },
+    {
+      externalId: 'lodge-skeleton-2',
+      type: 'lodging',
+      status: 'researched',
+      title: 'Hospedaje San Miguel el Alto (estimado · 3 noche(s))',
+      startAt: '2026-09-25T15:00:00-06:00',
+      endAt: '2026-09-28T12:00:00-06:00',
+      sourceType: 'agent',
+    },
+    {
+      externalId: 'lodge-skeleton-3',
+      type: 'lodging',
+      status: 'researched',
+      title: 'Hospedaje Guadalajara alternativa',
+      startAt: '2026-09-25T15:00:00-06:00',
+      endAt: '2026-09-28T12:00:00-06:00',
+      sourceType: 'agent',
+    },
+  ])
+}
+
+/** RUN B: same externalIds, new dates (reflexive supersede + spam updates in llmOps) */
+function proposedRunB(): TripPackageV1 {
+  return basePkg([
+    {
+      externalId: 'outbound-flight-1',
+      type: 'flight',
+      status: 'shortlisted',
+      title: 'AM222 MEX→GDL 25',
+      origin: 'MEX',
+      destination: 'GDL',
+      startAt: '2026-09-25T11:15:00-06:00',
+      endAt: '2026-09-25T12:52:00-06:00',
+      sourceType: 'flight_schedule',
+      sourceUrl: am222Url,
+      provider: 'Aeromexico',
+      verificationStatus: 'estimated',
+    },
+    {
+      externalId: 'return-flight-1',
+      type: 'flight',
+      status: 'shortlisted',
+      title: 'Y4141 GDL→MEX 28',
+      origin: 'GDL',
+      destination: 'MEX',
+      startAt: '2026-09-28T08:22:00-06:00',
+      endAt: '2026-09-28T09:45:00-06:00',
+      sourceType: 'flight_schedule',
+      sourceUrl: y4141Url,
+      provider: 'Volaris',
+      verificationStatus: 'estimated',
+    },
+    {
+      externalId: 'return-flight-2',
+      type: 'flight',
+      status: 'researched',
+      title: 'still listed wrongly',
+      origin: 'GDL',
+      destination: 'MEX',
+      startAt: '2026-09-21T12:00:00-06:00',
+      sourceType: 'agent',
+    },
+    {
+      externalId: 'lodge-skeleton-1',
+      type: 'lodging',
+      status: 'researched',
+      title: 'Hospedaje San Miguel el Alto',
+      startAt: '2026-09-25T15:00:00-06:00',
+      endAt: '2026-09-28T12:00:00-06:00',
+      sourceType: 'agent',
+    },
+    {
+      externalId: 'ground-transfer-1',
+      type: 'transfer',
+      status: 'researched',
+      title: 'Traslado Guadalajara → San Miguel el Alto',
+      sourceType: 'agent',
+    },
+  ])
+}
+
+function llmOpsRunA(): AgentOpRecord[] {
+  return [
+    {
+      op: 'supersede',
+      entityKind: 'travelOption',
+      externalId: 'outbound-flight-2',
+      supersedesExternalId: 'outbound-flight-1',
+    },
+    {
+      op: 'supersede',
+      entityKind: 'travelOption',
+      externalId: 'return-flight-3',
+      supersedesExternalId: 'return-flight-1',
+    },
+    {
+      op: 'remove',
+      entityKind: 'travelOption',
+      externalId: 'return-flight-2',
+    },
+  ]
+}
+
+function llmOpsRunB(): AgentOpRecord[] {
+  const spam: AgentOpRecord[] = []
+  for (let i = 0; i < 52; i++) {
+    spam.push({
+      op: 'update',
+      entityKind: 'travelOption',
+      externalId: 'lodge-skeleton-1',
+    })
+    spam.push({
+      op: 'update',
+      entityKind: 'travelOption',
+      externalId: 'ground-transfer-1',
+    })
+  }
+  return [
+    {
+      op: 'supersede',
+      entityKind: 'travelOption',
+      externalId: 'outbound-flight-1',
+      supersedesExternalId: 'outbound-flight-1',
+    },
+    {
+      op: 'supersede',
+      entityKind: 'travelOption',
+      externalId: 'return-flight-1',
+      supersedesExternalId: 'return-flight-1',
+    },
+    {
+      op: 'supersede',
+      entityKind: 'travelOption',
+      externalId: 'return-flight-2',
+      supersedesExternalId: 'return-flight-2',
+    },
+    ...spam,
+  ]
+}
+
+function planSignature(ops: AgentOpRecord[]): string {
+  return JSON.stringify(
+    ops.map((o) => [o.op, o.externalId, o.supersedesExternalId ?? null]),
+  )
+}
+
+describe('compileMutationPlan canonical Run A / Run B', () => {
+  it('Run A and Run B compile to equivalent mutation semantics', () => {
+    const current = currentState()
+    const trip = {
+      startDate: '2026-09-19',
+      endDate: '2026-09-22',
+      destination: 'San Miguel el Alto, Jalisco',
+    }
+
+    const a = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: trip,
+      currentOptions: current,
+      proposedPackage: proposedRunA(),
+      llmOps: llmOpsRunA(),
+    })
+    const b = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: trip,
+      currentOptions: current,
+      proposedPackage: proposedRunB(),
+      llmOps: llmOpsRunB(),
+    })
+
+    assert.equal(a.status, 'ok', a.conflicts.join('; '))
+    assert.equal(b.status, 'ok', b.conflicts.join('; '))
+
+    // Both remove obsolete alt return
+    assert.ok(a.ops.some((o) => o.op === 'remove' && o.externalId === 'return-flight-2'))
+    assert.ok(b.ops.some((o) => o.op === 'remove' && o.externalId === 'return-flight-2'))
+
+    // Both replace outbound (supersede OR update same id)
+    const aOut = a.ops.find(
+      (o) =>
+        (o.op === 'supersede' && o.supersedesExternalId === 'outbound-flight-1') ||
+        (o.op === 'update' && o.externalId === 'outbound-flight-1'),
+    )
+    const bOut = b.ops.find(
+      (o) =>
+        (o.op === 'supersede' && o.supersedesExternalId === 'outbound-flight-1') ||
+        (o.op === 'update' && o.externalId === 'outbound-flight-1'),
+    )
+    assert.ok(aOut)
+    assert.ok(bOut)
+
+    // Both replace preferred return
+    const aRet = a.ops.find(
+      (o) =>
+        (o.op === 'supersede' && o.supersedesExternalId === 'return-flight-1') ||
+        (o.op === 'update' && o.externalId === 'return-flight-1'),
+    )
+    const bRet = b.ops.find(
+      (o) =>
+        (o.op === 'supersede' && o.supersedesExternalId === 'return-flight-1') ||
+        (o.op === 'update' && o.externalId === 'return-flight-1'),
+    )
+    assert.ok(aRet)
+    assert.ok(bRet)
+
+    // Lodging: exactly one primary action; Run A may supersede to lodge-2; Run B update lodge-1
+    const aLodge = a.ops.filter(
+      (o) =>
+        o.externalId.includes('lodge') ||
+        o.supersedesExternalId === 'lodge-skeleton-1',
+    )
+    const bLodge = b.ops.filter(
+      (o) =>
+        o.externalId.includes('lodge') ||
+        o.supersedesExternalId === 'lodge-skeleton-1',
+    )
+    assert.ok(aLodge.length >= 1 && aLodge.length <= 2) // primary + maybe fallback add
+    assert.ok(bLodge.length >= 1 && bLodge.length <= 2)
+    // No spam updates
+    assert.ok(
+      bLodge.filter((o) => o.op === 'update' && o.externalId === 'lodge-skeleton-1')
+        .length <= 1,
+    )
+
+    // No spam: ops count bounded by affected entities
+    assert.ok(a.ops.length <= 8, `A ops=${a.ops.length}`)
+    assert.ok(b.ops.length <= 8, `B ops=${b.ops.length}`)
+
+    // No reflexive supersede in compiled plan
+    assert.ok(
+      ![...a.ops, ...b.ops].some(
+        (o) => o.op === 'supersede' && o.externalId === o.supersedesExternalId,
+      ),
+    )
+
+    // Fallback GDL lodging only once in Run A package
+    const aGdl = a.package.travelOptions.filter(
+      (o) => o.type === 'lodging' && /guadalajara/i.test(o.title),
+    )
+    assert.equal(aGdl.length, 1)
+
+    // Primary lodging only once
+    const aPrimaryLodge = a.package.travelOptions.filter(
+      (o) => o.type === 'lodging' && /san miguel/i.test(o.title),
+    )
+    assert.equal(aPrimaryLodge.length, 1)
+
+    const bPrimaryLodge = b.package.travelOptions.filter(
+      (o) => o.type === 'lodging' && /san miguel/i.test(o.title),
+    )
+    assert.equal(bPrimaryLodge.length, 1)
+  })
+
+  it('controlled E2E: compiled Run A plan yields clean final state', () => {
+    const current = currentState()
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: {
+        startDate: '2026-09-19',
+        endDate: '2026-09-22',
+        destination: 'San Miguel el Alto, Jalisco',
+      },
+      currentOptions: current,
+      proposedPackage: proposedRunA(),
+      llmOps: llmOpsRunA(),
+    })
+    assert.equal(compiled.status, 'ok', compiled.conflicts.join('; '))
+
+    const result = applyMutationInMemory({
+      tripId: TRIP_ID,
+      packageId: PKG_ID,
+      existing: current,
+      packageOptions: compiled.package.travelOptions.map((o) => ({
+        externalId: o.externalId,
+        type: o.type,
+        status: o.status,
+        title: o.title,
+        startAt: o.startAt,
+        endAt: o.endAt,
+        sourceType: o.sourceType,
+        sourceUrl: o.sourceUrl,
+        provider: o.provider,
+        verificationStatus: o.verificationStatus,
+        notes: o.notes,
+      })),
+      ops: compiled.ops,
+    })
+
+    const ids = result.options.map((o) => o.externalId).sort()
+    assert.equal(result.options.find((o) => o.externalId === 'outbound-flight-1'), undefined)
+    assert.equal(result.options.find((o) => o.externalId === 'return-flight-1'), undefined)
+    assert.equal(result.options.find((o) => o.externalId === 'return-flight-2'), undefined)
+    assert.ok(result.options.find((o) => o.externalId === 'outbound-flight-2'))
+    assert.ok(result.options.find((o) => o.externalId === 'return-flight-3'))
+    assert.ok(result.options.find((o) => o.externalId === 'ground-transfer-1'))
+    const lodges = result.options.filter((o) => o.type === 'lodging')
+    assert.ok(lodges.length >= 1 && lodges.length <= 2)
+    assert.equal(
+      lodges.filter((o) => /san miguel/i.test(o.title)).length,
+      1,
+    )
+    const sched = result.options.filter((o) => o.sourceType === 'flight_schedule')
+    assert.equal(sched.length, 2)
+    assert.ok(sched.every((o) => o.sourceUrl?.includes('aerodatabox')))
+    assert.ok(result.options.every((o) => o.tripId === TRIP_ID))
+    assert.ok(!ids.includes('lodge-skeleton-1') || lodges.length === 1)
+  })
+
+  it('controlled E2E: compiled Run B plan also cleans 20/21/22', () => {
+    const current = currentState()
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: {
+        startDate: '2026-09-19',
+        endDate: '2026-09-22',
+        destination: 'San Miguel el Alto, Jalisco',
+      },
+      currentOptions: current,
+      proposedPackage: proposedRunB(),
+      llmOps: llmOpsRunB(),
+    })
+    assert.equal(compiled.status, 'ok', compiled.conflicts.join('; '))
+
+    const result = applyMutationInMemory({
+      tripId: TRIP_ID,
+      packageId: PKG_ID,
+      existing: current,
+      packageOptions: compiled.package.travelOptions.map((o) => ({
+        externalId: o.externalId,
+        type: o.type,
+        status: o.status,
+        title: o.title,
+        startAt: o.startAt,
+        endAt: o.endAt,
+        sourceType: o.sourceType,
+        sourceUrl: o.sourceUrl,
+        provider: o.provider,
+        verificationStatus: o.verificationStatus,
+      })),
+      ops: compiled.ops,
+    })
+
+    assert.equal(result.options.find((o) => o.externalId === 'return-flight-2'), undefined)
+    assert.ok(result.options.find((o) => o.externalId === 'outbound-flight-1'))
+    assert.equal(
+      result.options.find((o) => o.externalId === 'outbound-flight-1')!.sourceType,
+      'flight_schedule',
+    )
+    assert.ok(result.options.find((o) => o.externalId === 'lodge-skeleton-1'))
+    assert.ok(result.options.find((o) => o.externalId === 'ground-transfer-1'))
+  })
+
+  it('idempotent: recompile same desired state → stable ops', () => {
+    const current = currentState()
+    const trip = {
+      startDate: '2026-09-19',
+      endDate: '2026-09-22',
+      destination: 'San Miguel el Alto, Jalisco',
+    }
+    const p1 = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: trip,
+      currentOptions: current,
+      proposedPackage: proposedRunA(),
+      llmOps: llmOpsRunA(),
+    })
+    const p2 = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: trip,
+      currentOptions: current,
+      proposedPackage: proposedRunA(),
+      llmOps: llmOpsRunA(),
+    })
+    assert.equal(planSignature(p1.ops), planSignature(p2.ops))
+  })
+
+  it('ambiguous dual primary lodging → review_required', () => {
+    const pkg = proposedRunA()
+    pkg.travelOptions = pkg.travelOptions.map((o) =>
+      o.externalId === 'lodge-skeleton-3'
+        ? { ...o, title: 'Otro hospedaje San Miguel el Alto centro' }
+        : o,
+    )
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: {
+        startDate: '2026-09-19',
+        endDate: '2026-09-22',
+        destination: 'San Miguel el Alto, Jalisco',
+      },
+      currentOptions: currentState(),
+      proposedPackage: pkg,
+      llmOps: [],
+    })
+    assert.equal(compiled.status, 'review_required')
+    assert.ok(compiled.conflicts.some((c) => /lodging_primary/i.test(c)))
+  })
+
+  it('protected outbound → review_required', () => {
+    const current = currentState()
+    current[0]!.status = 'selected'
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: {
+        startDate: '2026-09-19',
+        endDate: '2026-09-22',
+        destination: 'San Miguel el Alto, Jalisco',
+      },
+      currentOptions: current,
+      proposedPackage: proposedRunA(),
+      llmOps: llmOpsRunA(),
+    })
+    assert.equal(compiled.status, 'review_required')
+  })
+
+  it('absence without replacement does not remove ground-transfer', () => {
+    const pkg = proposedRunA()
+    // no transfer in proposal
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: {
+        startDate: '2026-09-19',
+        endDate: '2026-09-22',
+        destination: 'San Miguel el Alto, Jalisco',
+      },
+      currentOptions: currentState(),
+      proposedPackage: pkg,
+      llmOps: llmOpsRunA(),
+    })
+    assert.equal(compiled.status, 'ok', compiled.conflicts.join('; '))
+    assert.ok(
+      compiled.package.travelOptions.some((o) => o.externalId === 'ground-transfer-1'),
+    )
+    assert.ok(!compiled.ops.some((o) => o.op === 'remove' && o.externalId === 'ground-transfer-1'))
+  })
+})
+
+describe('window-aware matching + preservation + id normalize', () => {
+  const WINDOW = {
+    startDate: '2026-09-25',
+    endDate: '2026-09-28',
+    destination: 'San Miguel el Alto, Jalisco',
+  }
+
+  const outTitle =
+    'Vuelo estimado directo MEX → GDL el viernes 25 de septiembre 2026 a las 11:15'
+  const retTitle =
+    'Vuelo estimado directo GDL → MEX el lunes 28 de septiembre 2026 a las 08:22'
+  const lodgeTitle =
+    'Hospedaje San Miguel el Alto, Jalisco (estimado · 3 noche(s))'
+  const transferTitle =
+    'Traslado terrestre estimado Guadalajara → San Miguel el Alto'
+
+  function liveCurrent(): TravelOption[] {
+    return [
+      opt('outbound-flight-1', {
+        type: 'flight',
+        title: 'Vuelo estimado directo MEX → GDL el domingo 20 de septiembre',
+        origin: 'MEX',
+        destination: 'GDL',
+        startAt: '2026-09-20T07:00:00-06:00',
+        status: 'shortlisted',
+        sourceType: 'agent',
+      }),
+      opt('outbound-flight-25sep', {
+        type: 'flight',
+        title: outTitle,
+        origin: 'MEX',
+        destination: 'GDL',
+        startAt: '2026-09-25T11:15:00-06:00',
+        endAt: '2026-09-25T12:52:00-06:00',
+        status: 'shortlisted',
+        sourceType: 'flight_schedule',
+        sourceUrl: am222Url,
+        provider: 'Aeromexico',
+        verificationStatus: 'estimated',
+      }),
+      opt('return-flight-2', {
+        type: 'flight',
+        title: 'Vuelo estimado directo GDL → MEX el lunes 21 de septiembre',
+        origin: 'GDL',
+        destination: 'MEX',
+        startAt: '2026-09-21T12:00:00-06:00',
+        status: 'researched',
+        sourceType: 'agent',
+      }),
+      opt('return-flight-1', {
+        type: 'flight',
+        title: 'Vuelo estimado directo GDL → MEX el martes 22 de septiembre',
+        origin: 'GDL',
+        destination: 'MEX',
+        startAt: '2026-09-22T12:00:00-06:00',
+        status: 'shortlisted',
+        sourceType: 'agent',
+      }),
+      opt('return-flight-28sep', {
+        type: 'flight',
+        title: retTitle,
+        origin: 'GDL',
+        destination: 'MEX',
+        startAt: '2026-09-28T08:22:00-06:00',
+        endAt: '2026-09-28T09:45:00-06:00',
+        status: 'shortlisted',
+        sourceType: 'flight_schedule',
+        sourceUrl: y4141Url,
+        provider: 'Volaris',
+        verificationStatus: 'estimated',
+      }),
+      opt('lodge-skeleton-1', {
+        type: 'lodging',
+        title: lodgeTitle,
+        startAt: '2026-09-25T15:00:00-06:00',
+        endAt: '2026-09-28T12:00:00-06:00',
+        destination: 'San Miguel el Alto, Jalisco',
+        status: 'researched',
+        sourceType: 'agent',
+        verificationStatus: 'estimated',
+      }),
+      opt('ground-transfer-1', {
+        type: 'transfer',
+        title: transferTitle,
+        origin: 'GDL',
+        destination: 'San Miguel el Alto',
+        status: 'researched',
+        sourceType: 'agent',
+        verificationStatus: 'estimated',
+      }),
+    ]
+  }
+
+  /** Exact degraded live proposal package */
+  function liveDegradedProposal(): TripPackageV1 {
+    return basePkg([
+      {
+        externalId: 'ground-transfer-1',
+        type: 'transfer',
+        status: 'researched',
+        title: 'Opción investigada',
+        origin: 'GDL',
+        destination: 'San Miguel el Alto',
+        sourceType: 'agent',
+        verificationStatus: 'estimated',
+      },
+      {
+        externalId: 'lodge-skeleton-1',
+        type: 'lodging',
+        status: 'researched',
+        title: lodgeTitle,
+        destination: 'San Miguel el Alto, Jalisco',
+        sourceType: 'agent',
+        verificationStatus: 'estimated',
+      },
+      {
+        externalId: 'outbound-flight-25sep',
+        type: 'flight',
+        status: 'shortlisted',
+        title: 'Opción investigada',
+        origin: 'MEX',
+        destination: 'GDL',
+        sourceType: 'agent',
+        sourceUrl: am222Url,
+        provider: 'Aeromexico',
+        verificationStatus: 'estimated',
+      },
+      {
+        externalId: 'return-flight-28sep',
+        type: 'flight',
+        status: 'shortlisted',
+        title: 'Opción investigada',
+        origin: 'GDL',
+        destination: 'MEX',
+        sourceType: 'agent',
+        sourceUrl: y4141Url,
+        provider: 'Volaris',
+        verificationStatus: 'estimated',
+      },
+    ])
+  }
+
+  function liveMalformedLlmOps(): AgentOpRecord[] {
+    return [
+      {
+        op: 'remove',
+        entityKind: 'travelOption',
+        externalId: optionEntityId(TRIP_ID, 'outbound-flight-1'),
+        note: 'Eliminar vuelo 20 septiembre',
+      },
+      {
+        op: 'remove',
+        entityKind: 'travelOption',
+        externalId: optionEntityId(TRIP_ID, 'return-flight-1'),
+        note: 'Eliminar vuelo 22 septiembre',
+      },
+      {
+        op: 'remove',
+        entityKind: 'travelOption',
+        externalId: optionEntityId(TRIP_ID, 'return-flight-2'),
+        note: 'Eliminar vuelo 21 septiembre',
+      },
+      {
+        op: 'remove',
+        entityKind: 'itineraryItem',
+        externalId: `itin-${TRIP_ID}-airport-arrival-desk-outbound-flight-1`,
+      },
+    ]
+  }
+
+  it('1: OUT_OF_WINDOW + IN_WINDOW outbound → no ambiguity; IN_WINDOW wins', () => {
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: WINDOW,
+      currentOptions: liveCurrent(),
+      proposedPackage: liveDegradedProposal(),
+      llmOps: liveMalformedLlmOps(),
+    })
+    assert.equal(compiled.status, 'ok', compiled.conflicts.join('; '))
+    assert.ok(
+      !compiled.conflicts.some((c) => /ambiguous.*outbound/i.test(c)),
+    )
+    assert.ok(
+      compiled.ops.some(
+        (o) => o.op === 'remove' && o.externalId === 'outbound-flight-1',
+      ),
+    )
+    assert.ok(
+      compiled.ops.some(
+        (o) =>
+          o.op === 'update' && o.externalId === 'outbound-flight-25sep',
+      ),
+    )
+  })
+
+  it('2: two current outbound IN_WINDOW, proposal updates one by id → other alternative kept, no conflict', () => {
+    const current = liveCurrent().filter(
+      (o) => o.externalId !== 'outbound-flight-1',
+    )
+    current.push(
+      opt('outbound-flight-25sep-b', {
+        type: 'flight',
+        title: 'Otro MEX→GDL 25 tarde',
+        origin: 'MEX',
+        destination: 'GDL',
+        startAt: '2026-09-25T14:00:00-06:00',
+        status: 'shortlisted',
+      }),
+    )
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: WINDOW,
+      currentOptions: current,
+      proposedPackage: liveDegradedProposal(),
+      llmOps: [],
+    })
+    assert.equal(compiled.status, 'ok', compiled.conflicts.join('; '))
+    assert.ok(
+      compiled.ops.some(
+        (o) => o.op === 'update' && o.externalId === 'outbound-flight-25sep',
+      ),
+    )
+    assert.ok(
+      !compiled.ops.some((o) =>
+        [o.externalId, o.supersedesExternalId].includes('outbound-flight-25sep-b'),
+      ),
+    )
+    assert.ok(
+      compiled.package.travelOptions.some(
+        (o) => o.externalId === 'outbound-flight-25sep-b',
+      ),
+    )
+  })
+
+  it('3: OUT_OF_WINDOW returns + IN_WINDOW return → inequívoco', () => {
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: WINDOW,
+      currentOptions: liveCurrent(),
+      proposedPackage: liveDegradedProposal(),
+      llmOps: liveMalformedLlmOps(),
+    })
+    assert.equal(compiled.status, 'ok', compiled.conflicts.join('; '))
+    assert.ok(
+      compiled.ops.some(
+        (o) => o.op === 'remove' && o.externalId === 'return-flight-1',
+      ),
+    )
+    assert.ok(
+      compiled.ops.some(
+        (o) => o.op === 'remove' && o.externalId === 'return-flight-2',
+      ),
+    )
+    assert.ok(
+      compiled.ops.some(
+        (o) => o.op === 'update' && o.externalId === 'return-flight-28sep',
+      ),
+    )
+  })
+
+  it('4: proposal omits startAt → current startAt preserved', () => {
+    const cur = liveCurrent().find((o) => o.externalId === 'outbound-flight-25sep')!
+    const prop = liveDegradedProposal().travelOptions.find(
+      (o) => o.externalId === 'outbound-flight-25sep',
+    )!
+    const merged = mergePreservedPackageOption(cur, prop, {
+      allowTemporalReplace: false,
+    })
+    assert.equal(merged.startAt, cur.startAt)
+    assert.equal(merged.endAt, cur.endAt)
+  })
+
+  it('5: placeholder title without rename intent → current title preserved', () => {
+    const cur = liveCurrent().find((o) => o.externalId === 'outbound-flight-25sep')!
+    const prop = liveDegradedProposal().travelOptions.find(
+      (o) => o.externalId === 'outbound-flight-25sep',
+    )!
+    const merged = mergePreservedPackageOption(cur, prop)
+    assert.equal(merged.title, outTitle)
+    assert.notEqual(merged.title, 'Opción investigada')
+  })
+
+  it('6: proposal degrades sourceType → flight_schedule provenance preserved', () => {
+    const cur = liveCurrent().find((o) => o.externalId === 'outbound-flight-25sep')!
+    const prop = liveDegradedProposal().travelOptions.find(
+      (o) => o.externalId === 'outbound-flight-25sep',
+    )!
+    const merged = mergePreservedPackageOption(cur, prop)
+    assert.equal(merged.sourceType, 'flight_schedule')
+    assert.equal(merged.sourceUrl, am222Url)
+    assert.equal(merged.provider, 'Aeromexico')
+  })
+
+  it('7: explicit temporal change allows startAt/endAt update', () => {
+    const cur = liveCurrent().find((o) => o.externalId === 'lodge-skeleton-1')!
+    const prop = {
+      ...liveDegradedProposal().travelOptions.find(
+        (o) => o.externalId === 'lodge-skeleton-1',
+      )!,
+      startAt: '2026-09-26T15:00:00-06:00',
+      endAt: '2026-09-28T12:00:00-06:00',
+    }
+    const merged = mergePreservedPackageOption(cur, prop, {
+      allowTemporalReplace: true,
+    })
+    assert.equal(merged.startAt, '2026-09-26T15:00:00-06:00')
+  })
+
+  it('8: LLM hint optionEntityId → normalized to externalId', () => {
+    const current = liveCurrent()
+    const byExt = new Map(
+      current.map((o) => [
+        o.externalId!,
+        {
+          externalId: o.externalId!,
+          type: o.type,
+          status: o.status,
+          title: o.title,
+          startAt: o.startAt,
+          endAt: o.endAt,
+          raw: o,
+        },
+      ]),
+    )
+    const byEntity = new Map(
+      current.map((o) => [o.id, byExt.get(o.externalId!)!]),
+    )
+    const resolved = normalizeHintExternalId(
+      optionEntityId(TRIP_ID, 'outbound-flight-1'),
+      {
+        tripId: TRIP_ID,
+        packageIds: new Set([TRIP_ID]),
+        currentByExternalId: byExt as never,
+        currentByEntityId: byEntity as never,
+      },
+    )
+    assert.equal(resolved?.externalId, 'outbound-flight-1')
+  })
+
+  it('9: entityId from another trip → ignored safely', () => {
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: WINDOW,
+      currentOptions: liveCurrent(),
+      proposedPackage: liveDegradedProposal(),
+      llmOps: [
+        {
+          op: 'remove',
+          entityKind: 'travelOption',
+          externalId: 'opt-OTHER-TRIP-ID-outbound-flight-25sep',
+        },
+      ],
+    })
+    // Must not remove the real outbound-flight-25sep
+    assert.ok(
+      !compiled.ops.some(
+        (o) =>
+          o.op === 'remove' && o.externalId === 'outbound-flight-25sep',
+      ),
+    )
+    assert.ok(
+      compiled.package.travelOptions.some(
+        (o) => o.externalId === 'outbound-flight-25sep',
+      ),
+    )
+  })
+
+  it('10: EXACT live fixture → 7→4 canonical, no review, no degradation', () => {
+    const current = liveCurrent()
+    assert.equal(current.length, 7)
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: WINDOW,
+      currentOptions: current,
+      proposedPackage: liveDegradedProposal(),
+      llmOps: liveMalformedLlmOps(),
+    })
+    assert.equal(compiled.status, 'ok', compiled.conflicts.join('; '))
+    assert.ok(!compiled.conflicts.length)
+
+    const removes = compiled.ops
+      .filter((o) => o.op === 'remove')
+      .map((o) => o.externalId)
+      .sort()
+    assert.deepEqual(removes, [
+      'outbound-flight-1',
+      'return-flight-1',
+      'return-flight-2',
+    ])
+
+    const ids = compiled.package.travelOptions.map((o) => o.externalId).sort()
+    assert.deepEqual(ids, [
+      'ground-transfer-1',
+      'lodge-skeleton-1',
+      'outbound-flight-25sep',
+      'return-flight-28sep',
+    ])
+
+    const out = compiled.package.travelOptions.find(
+      (o) => o.externalId === 'outbound-flight-25sep',
+    )!
+    assert.equal(out.startAt, '2026-09-25T11:15:00-06:00')
+    assert.equal(out.endAt, '2026-09-25T12:52:00-06:00')
+    assert.equal(out.sourceType, 'flight_schedule')
+    assert.equal(out.sourceUrl, am222Url)
+    assert.equal(out.provider, 'Aeromexico')
+    assert.equal(out.title, outTitle)
+
+    const ret = compiled.package.travelOptions.find(
+      (o) => o.externalId === 'return-flight-28sep',
+    )!
+    assert.equal(ret.startAt, '2026-09-28T08:22:00-06:00')
+    assert.equal(ret.endAt, '2026-09-28T09:45:00-06:00')
+    assert.equal(ret.sourceType, 'flight_schedule')
+    assert.equal(ret.title, retTitle)
+
+    const lodge = compiled.package.travelOptions.find(
+      (o) => o.externalId === 'lodge-skeleton-1',
+    )!
+    assert.equal(lodge.startAt, '2026-09-25T15:00:00-06:00')
+    assert.equal(lodge.endAt, '2026-09-28T12:00:00-06:00')
+    assert.equal(lodge.title, lodgeTitle)
+
+    const transfer = compiled.package.travelOptions.find(
+      (o) => o.externalId === 'ground-transfer-1',
+    )!
+    assert.equal(transfer.title, transferTitle)
+    assert.equal(transfer.origin, 'GDL')
+
+    const result = applyMutationInMemory({
+      tripId: TRIP_ID,
+      packageId: PKG_ID,
+      existing: current,
+      packageOptions: compiled.package.travelOptions.map((o) => ({
+        externalId: o.externalId,
+        type: o.type,
+        status: o.status,
+        title: o.title,
+        startAt: o.startAt,
+        endAt: o.endAt,
+        sourceType: o.sourceType,
+        sourceUrl: o.sourceUrl,
+        provider: o.provider,
+        verificationStatus: o.verificationStatus,
+        notes: o.notes,
+      })),
+      ops: compiled.ops,
+    })
+    assert.equal(result.options.length, 4)
+    assert.equal(
+      result.options.find((o) => o.externalId === 'outbound-flight-25sep')!
+        .sourceType,
+      'flight_schedule',
+    )
+    assert.equal(
+      result.options.find((o) => o.externalId === 'outbound-flight-25sep')!
+        .startAt,
+      '2026-09-25T11:15:00-06:00',
+    )
+  })
+
+  it('11: compileMutationPlan is pure — does not mutate input arrays', () => {
+    const current = liveCurrent()
+    const beforeIds = current.map((o) => o.externalId).join(',')
+    const beforeLen = current.length
+    const pkg = liveDegradedProposal()
+    const pkgLen = pkg.travelOptions.length
+    compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: WINDOW,
+      currentOptions: current,
+      proposedPackage: pkg,
+      llmOps: liveMalformedLlmOps(),
+    })
+    assert.equal(current.length, beforeLen)
+    assert.equal(current.map((o) => o.externalId).join(','), beforeIds)
+    assert.equal(pkg.travelOptions.length, pkgLen)
+  })
+
+  it('12: protected selected outbound still blocks delete', () => {
+    const current = liveCurrent()
+    const obsolete = current.find((o) => o.externalId === 'outbound-flight-1')!
+    obsolete.status = 'selected'
+    const compiled = compileMutationPlan({
+      tripId: TRIP_ID,
+      currentTrip: WINDOW,
+      currentOptions: current,
+      proposedPackage: liveDegradedProposal(),
+      llmOps: liveMalformedLlmOps(),
+    })
+    assert.equal(compiled.status, 'review_required')
+    assert.ok(compiled.conflicts.some((c) => /protected/i.test(c)))
+  })
+})

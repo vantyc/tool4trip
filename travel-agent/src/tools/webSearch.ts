@@ -153,7 +153,8 @@ async function searchTavily(
   const hits = (data.results ?? []).slice(0, 5).map((r) => ({
     title: r.title ?? '',
     url: r.url ?? '',
-    snippet: (r.content ?? '').slice(0, 400),
+    // Same bound as a claim's quotedFact: evidence past it could never ground a claim.
+    snippet: (r.content ?? '').slice(0, 800),
   }))
   const trace: ToolTraceEntry = {
     tool: 'webSearch',

@@ -1,0 +1,120 @@
+{
+  "_meta": {
+    "description": "Regression fixture: Nuevo viaje last-minute MEX→GDL→San Miguel el Alto 19–22 Sep 2026. Sanitized — no API keys. Prompt reconstructed from production failed job c90505ce webSearch queries + visible UI fragment (textarea was scrolled; full client-side text not persisted server-side).",
+    "failedJobId": "c90505ce-9140-4a92-be99-de8faccf3652",
+    "failedAt": "2026-09-19T13:53:08.104Z",
+    "errorPaths": [
+      "package.travelOptions[3].startAt",
+      "package.travelOptions[3].endAt"
+    ],
+    "errorMessage": "Datetime debe ser ISO 8601 con offset"
+  },
+  "prompt": "Viaje de última hora: hoy sábado 19 de septiembre de 2026 salgo de Ciudad de México (AICM / MEX) a Guadalajara (GDL). Quiero llegar a San Miguel el Alto, Jalisco, para las fiestas; la serenata es el domingo 20 de septiembre de 2026. Regreso preferido martes 22 (lunes 21 solo alternativa).\n\nPrioridades del día de salida: vuelo MEX→GDL razonable hoy; si hay tiempo, una torta ahogada tradicional cerca del aeropuerto de Guadalajara; autobús o traslado GDL→San Miguel el Alto; hospedaje cerca de Plaza de Armas / Ramón Corona para las noches del 19, 20 y 21.\n\nSi el traslado de hoy sale tan tarde que implique transporte peligroso o pagar una cantidad desproporcionada, propone como alternativa salir temprano mañana domingo 20 y llegar antes de la serenata. No inventes vuelos, horarios, precios, disponibilidad ni eventos. Los datos no comprobados deben quedar como UNKNOWN o pendientes de confirmar. No hagas reservaciones ni compras.",
+  "invalidDraft": {
+    "narrative": "Propuesta esqueleto de última hora MEX–GDL–San Miguel el Alto 19–22 sep 2026. Horarios estimados; serenata pendiente de verificar.",
+    "warnings": [
+      "Sin confirmación web de la serenata el 20 de septiembre de 2026."
+    ],
+    "diffSummary": [],
+    "ops": [],
+    "claims": [],
+    "package": {
+      "schemaVersion": 1,
+      "packageId": "new-fixture-sma-last-minute",
+      "revision": 1,
+      "trip": {
+        "id": "00000000-0000-4000-8000-000000000099",
+        "title": "Última hora SMA sep 2026",
+        "destination": "San Miguel el Alto, Jalisco",
+        "startDate": "2026-09-19",
+        "endDate": "2026-09-22",
+        "timezone": "America/Mexico_City",
+        "goals": ["serenata", "fiestas"],
+        "status": "planned"
+      },
+      "travelOptions": [
+        {
+          "externalId": "flt-out",
+          "type": "flight",
+          "status": "shortlisted",
+          "title": "MEX → GDL estimado 19 sep",
+          "origin": "MEX — CDMX",
+          "destination": "GDL — Guadalajara",
+          "startAt": "2026-09-19T14:30:00Z",
+          "verificationStatus": "estimated",
+          "sourceType": "agent"
+        },
+        {
+          "externalId": "flt-ret-preferred",
+          "type": "flight",
+          "status": "shortlisted",
+          "title": "GDL → MEX preferido 22 sep",
+          "origin": "GDL",
+          "destination": "MEX",
+          "startAt": "2026-09-22T18:00:00-06:00",
+          "verificationStatus": "estimated",
+          "sourceType": "agent"
+        },
+        {
+          "externalId": "bus-gdl-sma",
+          "type": "bus",
+          "status": "researched",
+          "title": "Autobús GDL → San Miguel el Alto estimado",
+          "origin": "Guadalajara",
+          "destination": "San Miguel el Alto",
+          "startAt": "2026-09-19T17:00:00-06:00",
+          "verificationStatus": "estimated",
+          "sourceType": "agent"
+        },
+        {
+          "externalId": "lodge-sma",
+          "type": "lodging",
+          "status": "researched",
+          "title": "Hospedaje cerca Plaza de Armas / Ramón Corona",
+          "destination": "San Miguel el Alto",
+          "address": "Plaza de Armas Ramón Corona",
+          "startAt": "2026-09-19T20:00:00",
+          "endAt": "2026-09-22T12:00:00",
+          "verificationStatus": "estimated",
+          "sourceType": "agent",
+          "notes": "Bare local datetimes without offset — reproduces prod Zod failure at travelOptions[3]."
+        },
+        {
+          "externalId": "flt-ret-alt",
+          "type": "flight",
+          "status": "researched",
+          "title": "GDL → MEX alternativa 21 sep",
+          "origin": "GDL",
+          "destination": "MEX",
+          "startAt": "2026-09-21T18:00:00-06:00",
+          "verificationStatus": "estimated",
+          "sourceType": "agent",
+          "notes": "Alternativa — no es el regreso preferido."
+        }
+      ],
+      "itineraryItems": [
+        {
+          "externalId": "goal-serenata",
+          "title": "Serenata (objetivo del viajero)",
+          "startAt": "2026-09-20T20:00:00",
+          "place": "San Miguel el Alto",
+          "importance": "crucial",
+          "notes": "Pendiente de verificar — bare datetime without offset."
+        }
+      ],
+      "checklistItems": [
+        {
+          "externalId": "chk-flights",
+          "label": "Confirmar vuelos en aerolínea",
+          "dueAt": "2026-09-19"
+        }
+      ],
+      "notes": [
+        {
+          "externalId": "note-1",
+          "body": "Fixture sanitizado — sin URLs de checkout ni claves."
+        }
+      ]
+    }
+  }
+}

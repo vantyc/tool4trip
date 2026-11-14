@@ -57,7 +57,14 @@ const packageOptionStatus = z.enum(PACKAGE_OPTION_STATUSES)
 
 const verificationStatus = z.enum(['verified', 'estimated', 'unverified'])
 
-const sourceType = z.enum(['cursor', 'manual', 'imported', 'agent', 'other'])
+const sourceType = z.enum([
+  'cursor',
+  'manual',
+  'imported',
+  'agent',
+  'other',
+  'flight_schedule',
+])
 
 const importance = z.enum(['crucial', 'recommended', 'optional'])
 
@@ -108,6 +115,15 @@ const packageTravelOptionSchema = z
     verificationStatus: verificationStatus.optional(),
     sourceType: sourceType.default('cursor'),
     notes: z.string().optional(),
+    logicalRole: z
+      .enum([
+        'flight_outbound',
+        'flight_return',
+        'lodging_primary',
+        'lodging_fallback',
+        'ground_transfer',
+      ])
+      .optional(),
   })
   .strict()
   .superRefine((opt, ctx) => {

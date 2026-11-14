@@ -1,4 +1,8 @@
-import type { AgentAskRequest, AgentProposal } from '../../shared/agentContracts.ts'
+import type {
+  AgentAskRequest,
+  AgentProposal,
+  ComponentActionResult,
+} from '../../shared/agentContracts.ts'
 import {
   AgentConfigError,
   AgentRuntimeError,
@@ -9,10 +13,13 @@ import type { ToolTraceEntry } from '../../shared/agentContracts.ts'
 import { logJobEvent } from './log.ts'
 import type { InMemoryJobStore, JobRecord } from './store.ts'
 
-export type JobRunner = (req: AgentAskRequest, meta: {
-  jobId: string
-  requestId: string
-}) => Promise<AgentRunResult | AgentProposal>
+export type JobRunner = (
+  req: AgentAskRequest,
+  meta: {
+    jobId: string
+    requestId: string
+  },
+) => Promise<AgentRunResult | AgentProposal>
 
 export type JobWorkerOptions = {
   store: InMemoryJobStore
@@ -43,7 +50,10 @@ export class JobWorker {
     queueMicrotask(() => {
       void this.pump().finally(() => {
         this.pumping = false
-        if (this.store.queued > 0 && this.store.running < this.store.maxConcurrencyLimit) {
+        if (
+          this.store.queued > 0 &&
+          this.store.running < this.store.maxConcurrencyLimit
+        ) {
           this.kick()
         }
       })
@@ -92,23 +102,52 @@ export class JobWorker {
         jobId: job.jobId,
         requestId: job.requestId,
       })
-      const proposal =
-        'proposal' in result && result.proposal
-          ? result.proposal
-          : (result as AgentProposal)
-      const meta = 'meta' in result ? result.meta : undefined
-      this.store.markSucceeded(job.jobId, proposal, {
-        steps: meta?.steps,
-        lastFinishReason: meta?.lastFinishReason,
-        usage: meta?.usage,
-      })
+
+      let proposal: AgentProposal | undefined
+      let componentActionResult: ComponentActionResult | undefined
+      let meta:
+        | {
+            steps?: number
+            llmCalls?: number
+            lastFinishReason?: string | null
+            usage?: {
+              inputTokens: number
+              outputTokens: number
+              totalTokens: number
+            }
+            hadRepair?: boolean
+            finalContentChars?: number
+          }
+        | undefined
+
+      if (result && typeof result === 'object' && 'meta' in result) {
+        const run = result as AgentRunResult
+        proposal = run.proposal
+        componentActionResult = run.componentActionResult
+        meta = run.meta
+      } else {
+        proposal = result as AgentProposal
+      }
+
+      this.store.markSucceeded(
+        job.jobId,
+        { proposal, componentActionResult },
+        {
+          steps: meta?.steps,
+          lastFinishReason: meta?.lastFinishReason,
+          usage: meta?.usage,
+        },
+      )
       logJobEvent('job_status', {
         jobId: job.jobId,
         requestId: job.requestId,
         tripId: job.tripId,
         status: 'succeeded',
         durationMs: Date.now() - t0,
-        tool: proposal.toolTrace?.[0]?.tool ?? null,
+        tool:
+          proposal?.toolTrace?.[0]?.tool ??
+          componentActionResult?.toolTrace?.[0]?.tool ??
+          null,
         llmCalls: meta?.llmCalls ?? null,
         hadRepair: meta?.hadRepair ?? null,
         finalContentChars: meta?.finalContentChars ?? null,

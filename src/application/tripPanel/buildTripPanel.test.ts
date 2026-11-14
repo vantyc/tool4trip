@@ -1,0 +1,443 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, it } from 'node:test'
+import type { AgentProposal } from '../../../shared/agentContracts'
+import type { SharedTripPackageV1 } from '../../../shared/agentContracts'
+import type {
+  ChecklistItem,
+  ItineraryItem,
+  Note,
+  TravelOption,
+  Trip,
+} from '../../domain/types'
+import {
+  buildTripPanelFromPackage,
+  buildTripPanelFromPersisted,
+  buildTripPanelFromProposal,
+  dedupeDestinations,
+  deriveAirportArrival,
+  isAirportArrivalActivity,
+} from './buildTripPanel.ts'
+
+const fixDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
+
+function loadPkg(name: string): SharedTripPackageV1 {
+  return JSON.parse(readFileSync(join(fixDir, name), 'utf8')) as SharedTripPackageV1
+}
+
+describe('tripPanel model', () => {
+  it('1: propuesta completa con fuentes', () => {
+    const pkg = loadPkg('complete-with-sources.json')
+    const model = buildTripPanelFromPackage(pkg, {
+      narrative: 'Viaje familiar corto con fuentes.',
+      warnings: [],
+      includeTechnicalJson: true,
+    })
+    assert.equal(model.diagnostics.sourceCount, 4)
+    assert.ok(model.diagnostics.verifiedCount >= 3)
+    assert.equal(model.diagnostics.missingCount, 0)
+    assert.equal(model.diagnostics.needsCreateConfirm, false)
+    assert.equal(model.diagnostics.integrityLight, 'green')
+    assert.equal(model.flightsOut.length, 1)
+    assert.equal(model.flightsReturn.length, 1)
+    assert.equal(model.lodging.length, 1)
+    assert.ok(model.lodging[0]!.provider)
+    assert.ok(model.lodging[0]!.price !== undefined)
+    assert.ok(model.executiveSummary)
+    assert.ok(model.technical?.jsonText)
+  })
+
+  it('2: propuesta estimada sin fuentes', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    const model = buildTripPanelFromPackage(pkg, { warnings: [] })
+    assert.equal(model.diagnostics.sourceCount, 0)
+    assert.equal(model.diagnostics.verifiedCount, 0)
+    assert.ok(model.diagnostics.pendingCount >= 1)
+    assert.equal(model.diagnostics.needsCreateConfirm, true)
+    assert.equal(model.diagnostics.integrityLight, 'red')
+    assert.ok(
+      model.diagnostics.warnings.some((w) => /ausencia de fuentes/i.test(w)),
+    )
+  })
+
+  it('3: vuelo principal y alternativa', () => {
+    const pkg = loadPkg('return-with-alternative.json')
+    const model = buildTripPanelFromPackage(pkg)
+    assert.equal(model.flightsReturn.length, 2)
+    const alts = model.flightsReturn.filter((c) => c.status === 'alternative')
+    const primary = model.flightsReturn.filter((c) => c.status !== 'alternative')
+    assert.equal(alts.length, 1)
+    assert.equal(primary.length, 1)
+    assert.ok(
+      model.diagnostics.warnings.some((w) => /alternativa/i.test(w)),
+    )
+  })
+
+  it('4: destinos y actividades duplicados', () => {
+    const pkg = loadPkg('duplicates.json')
+    const model = buildTripPanelFromPackage(pkg)
+    assert.ok(
+      model.diagnostics.warnings.some((w) => /duplicad/i.test(w)),
+    )
+  })
+
+  it('5: traslado de regreso faltante', () => {
+    const pkg = loadPkg('missing-return.json')
+    const model = buildTripPanelFromPackage(pkg)
+    assert.equal(model.flightsOut.length, 1)
+    assert.equal(model.flightsReturn.length, 0)
+    assert.ok(model.diagnostics.missingCount >= 1)
+    assert.ok(
+      model.diagnostics.warnings.some((w) => /vuelo de regreso/i.test(w)),
+    )
+    assert.ok(
+      model.lodging.some((c) => c.status === 'missing') ||
+        model.diagnostics.missingCount >= 1,
+    )
+  })
+
+  it('6: campos opcionales y UNKNOWN', () => {
+    const pkg = loadPkg('unknown-optional.json')
+    const model = buildTripPanelFromPackage(pkg)
+    // Trip has no destination; header uses flight destination when present
+    assert.ok(model.header.destinations.length >= 1)
+    const flight = model.flightsOut[0]!
+    assert.equal(flight.startAt, undefined)
+    assert.equal(flight.price, undefined)
+    // Soft status: no "fecha ausente" nag — clocks are omitted by design
+    assert.ok(
+      !model.diagnostics.warnings.some((w) => /fecha\/hora ausente/i.test(w)),
+    )
+    // Card must not invent provider/price fields
+    assert.equal(flight.provider, undefined)
+    assert.equal(flight.currency, undefined)
+    // Nights > 0 without lodging → missing slot
+    assert.ok(model.diagnostics.missingCount >= 1)
+    assert.ok(model.lodging.some((c) => c.status === 'missing'))
+  })
+
+  it('7: renderizado de viaje persistido', () => {
+    const trip: Trip = {
+      id: 'persisted-1',
+      title: 'Filipinas nov–dic',
+      destination: 'Filipinas',
+      startDate: '2026-11-15',
+      endDate: '2026-11-29',
+      timezone: 'America/Mexico_City',
+      goals: [{ id: 'g1', label: 'clima' }],
+      status: 'planned',
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+      syncStatus: 'synced',
+    }
+    const options: TravelOption[] = [
+      {
+        id: 'opt-1',
+        tripId: trip.id,
+        type: 'flight',
+        status: 'shortlisted',
+        title: 'MEX → MNL',
+        origin: 'MEX',
+        destination: 'MNL',
+        startAt: '2026-11-15T10:00:00-06:00',
+        verificationStatus: 'estimated',
+        sourceType: 'agent',
+        externalId: 'flt-out',
+        createdAt: trip.createdAt,
+        updatedAt: trip.updatedAt,
+        syncStatus: 'synced',
+      },
+      {
+        id: 'opt-2',
+        tripId: trip.id,
+        type: 'flight',
+        status: 'researched',
+        title: 'Regreso MNL → MEX',
+        origin: 'MNL',
+        destination: 'MEX',
+        startAt: '2026-11-29T20:00:00-06:00',
+        verificationStatus: 'estimated',
+        sourceType: 'agent',
+        externalId: 'flt-ret',
+        createdAt: trip.createdAt,
+        updatedAt: trip.updatedAt,
+        syncStatus: 'synced',
+      },
+      {
+        id: 'opt-3',
+        tripId: trip.id,
+        type: 'lodging',
+        status: 'researched',
+        title: 'Manila lodging',
+        destination: 'Manila',
+        verificationStatus: 'unverified',
+        sourceType: 'agent',
+        externalId: 'lodge-1',
+        createdAt: trip.createdAt,
+        updatedAt: trip.updatedAt,
+        syncStatus: 'synced',
+      },
+    ]
+    const itinerary: ItineraryItem[] = []
+    const checklist: ChecklistItem[] = [
+      {
+        id: 'c1',
+        tripId: trip.id,
+        label: 'Visa',
+        status: 'open',
+        sortOrder: 0,
+        createdAt: trip.createdAt,
+        updatedAt: trip.updatedAt,
+        syncStatus: 'synced',
+      },
+    ]
+    const notes: Note[] = [
+      {
+        id: 'n1',
+        tripId: trip.id,
+        body: 'Sin reservas aún',
+        createdAt: trip.createdAt,
+        updatedAt: trip.updatedAt,
+        syncStatus: 'synced',
+      },
+    ]
+    const model = buildTripPanelFromPersisted({
+      trip,
+      options,
+      itinerary,
+      checklist,
+      notes,
+      bookings: [],
+    })
+    assert.equal(model.header.title, 'Filipinas nov–dic')
+    assert.equal(model.header.statusLabel, 'planned')
+    assert.equal(model.flightsOut.length, 1)
+    assert.equal(model.flightsReturn.length, 1)
+    assert.equal(model.lodging.length, 1)
+    assert.equal(model.checklist.length, 1)
+    assert.equal(model.notes.length, 1)
+    // Estimated flights must not surface inventable clocks/prices
+    assert.equal(model.flightsOut[0]!.startAt, undefined)
+    assert.equal(model.flightsOut[0]!.airportArrival, undefined)
+    assert.equal(model.flightsOut[0]!.price, undefined)
+  })
+
+  it('proposal wrapper includes draft status and budget when present', () => {
+    const pkg = loadPkg('complete-with-sources.json')
+    const proposal: AgentProposal = {
+      proposalId: 'p1',
+      createdAt: '2026-09-19T12:00:00Z',
+      narrative: 'Resumen largo '.repeat(30),
+      warnings: ['aviso'],
+      diffSummary: [],
+      ops: [],
+      toolTrace: [],
+      package: pkg,
+      estimatedCostDelta: {
+        amount: 5000,
+        currency: 'MXN',
+        confidence: 'estimated',
+      },
+    }
+    const model = buildTripPanelFromProposal(proposal)
+    assert.match(model.header.statusLabel, /DRAFT/)
+    assert.equal(model.header.budgetAmount, 5000)
+    assert.equal(model.header.budgetCurrency, 'MXN')
+    assert.ok((model.executiveSummary?.length ?? 0) <= 221)
+  })
+
+  it('8: estimado no muestra precio/horario inventado; verified sí + arribo', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    const model = buildTripPanelFromPackage(pkg)
+    assert.equal(model.flightsOut[0]!.status, 'estimated')
+    assert.equal(model.flightsOut[0]!.startAt, undefined)
+    assert.equal(model.flightsOut[0]!.price, undefined)
+    assert.equal(model.flightsOut[0]!.airportArrival, undefined)
+
+    const verified = loadPkg('complete-with-sources.json')
+    const vModel = buildTripPanelFromPackage(verified)
+    assert.equal(vModel.flightsOut[0]!.status, 'verified')
+    assert.ok(vModel.flightsOut[0]!.startAt)
+    assert.ok(vModel.flightsOut[0]!.airportArrival)
+    assert.match(
+      vModel.flightsOut[0]!.airportArrival!.airportLabel,
+      /MEX/,
+    )
+    // Airport arrival itinerary rows are not duplicated as activities
+    assert.ok(
+      !vModel.activities.some((a) =>
+        isAirportArrivalActivity(a.id, a.title),
+      ),
+    )
+  })
+
+  it('9: destinos del header se normalizan/deduplican por contención', () => {
+    const dests = dedupeDestinations([
+      'San Miguel el Alto, Jalisco',
+      'San Miguel el Alto',
+      'San Miguel el Alto',
+      'GDL',
+    ])
+    assert.equal(dests.length, 2)
+    assert.ok(dests.some((d) => /San Miguel/i.test(d)))
+    assert.ok(dests.some((d) => d === 'GDL'))
+  })
+
+  it('10: deriveAirportArrival solo con startAt', () => {
+    assert.equal(deriveAirportArrival({ origin: 'MEX', destination: 'GDL' }), undefined)
+    const info = deriveAirportArrival({
+      startAt: '2026-09-19T13:00:00-06:00',
+      origin: 'MEX',
+      destination: 'GDL',
+    })
+    assert.ok(info)
+    assert.equal(info!.scope, 'domestic')
+    assert.equal(info!.deskMinutes, 150)
+  })
+
+  it('11: advertencias vacías no pasan al detalle técnico', () => {
+    const pkg = loadPkg('complete-with-sources.json')
+    const model = buildTripPanelFromPackage(pkg, {
+      warnings: ['', '  ', 'aviso real'],
+      includeTechnicalJson: true,
+    })
+    assert.deepEqual(model.technical?.warnings, ['aviso real'])
+  })
+
+  it('12: airport-arrival itinerary filtered from activities', () => {
+    const pkg = loadPkg('complete-with-sources.json')
+    pkg.itineraryItems.push({
+      externalId: 'airport-arrival-desk-flt-out',
+      title: 'Arribo al aeropuerto MEX',
+      startAt: '2026-10-01T06:30:00-06:00',
+      place: 'MEX',
+      importance: 'crucial',
+      notes: 'policy',
+    })
+    const model = buildTripPanelFromPackage(pkg)
+    assert.ok(
+      !model.activities.some((a) => a.id.startsWith('airport-arrival-')),
+    )
+  })
+
+  it('13: user_supplied distinct from estimated/unknown', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    const flt = pkg.travelOptions.find((o) => o.type === 'flight')
+    assert.ok(flt)
+    flt!.sourceType = 'manual'
+    flt!.verificationStatus = 'unverified'
+    flt!.startAt = '2026-09-19T19:40:00-06:00'
+    flt!.notes = 'Dato del viajero: sale a las 19:40'
+    const model = buildTripPanelFromPackage(pkg)
+    const card = [...model.flightsOut, ...model.flightsReturn].find(
+      (c) => c.externalId === flt!.externalId,
+    )
+    assert.ok(card)
+    assert.equal(card!.status, 'user_supplied')
+    assert.equal(card!.startAt, '2026-09-19T19:40:00-06:00')
+    assert.notEqual(card!.status, 'estimated')
+    assert.notEqual(card!.status, 'pending')
+  })
+
+  it('14: 0 option sources but toolTrace hits → consulted vs anchored distinguished', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    for (const o of pkg.travelOptions) {
+      delete (o as { sourceUrl?: string }).sourceUrl
+    }
+    const model = buildTripPanelFromPackage(pkg, {
+      consultedSourceUrls: [
+        'https://example.com/a',
+        'https://example.com/b',
+        'https://example.com/a',
+      ],
+    })
+    assert.equal(model.diagnostics.sourceCount, 0)
+    assert.equal(model.diagnostics.consultedSourceCount, 2)
+    assert.ok(
+      model.diagnostics.warnings.some((w) =>
+        /Evidencia consultada sin anclar: 2 URL/i.test(w),
+      ),
+    )
+  })
+
+  it('14b: research-only with a grounded finding is not presented as zero verified evidence', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    pkg.travelOptions = []
+    const url = 'https://www.villa-alba.example/Eventos/2019/7OctNoche2019.php'
+    const base: AgentProposal = {
+      proposalId: 'p-ro',
+      createdAt: '2026-09-29T12:00:00Z',
+      narrative: 'Investigación',
+      warnings: [],
+      diffSummary: [],
+      ops: [],
+      toolTrace: [
+        {
+          tool: 'fetchUrl',
+          args: { url },
+          ok: true,
+          sources: [{ url, snippet: '7 de Octubre del 2019' }],
+          checkedAt: '2026-09-29T12:00:00Z',
+        },
+      ],
+      package: pkg,
+    }
+    const diag = (reason: string, decision: 'accepted' | 'rejected') => ({
+      goals: [],
+      candidates: [{ url, goalIds: [], decision, reason }],
+      toolRounds: 1,
+      toolCallsUsed: 1,
+      maxToolCalls: 12,
+      forcedExtraRounds: 0,
+      consultedSourceCount: 1,
+      anchoredSourceCount: 0,
+    })
+    const grounded = buildTripPanelFromProposal({
+      ...base,
+      researchDiagnostics: diag('grounded_claim', 'accepted'),
+    })
+    assert.equal(grounded.diagnostics.sourceCount, 0, 'package anchoring unchanged')
+    assert.equal(grounded.diagnostics.groundedFindingSourceCount, 1)
+    assert.ok(!grounded.diagnostics.warnings.some((w) => /Ausencia de fuentes/.test(w)))
+    assert.ok(
+      grounded.diagnostics.warnings.some((w) =>
+        /Sin fuentes ancladas a entidades del paquete; 1 fuente\(s\) verificada\(s\) respaldan hallazgos/.test(w),
+      ),
+    )
+    const none = buildTripPanelFromProposal({
+      ...base,
+      researchDiagnostics: diag('insufficient_evidence', 'rejected'),
+    })
+    assert.equal(none.diagnostics.groundedFindingSourceCount, undefined)
+    assert.ok(none.diagnostics.warnings.some((w) => /Ausencia de fuentes/.test(w)))
+  })
+
+  it('15: flight_schedule retains clocks and is HORARIO PUBLICADO (not fare)', () => {
+    const pkg = loadPkg('estimated-no-sources.json')
+    const flt = pkg.travelOptions.find((o) => o.type === 'flight')
+    assert.ok(flt)
+    flt!.sourceType = 'flight_schedule'
+    flt!.verificationStatus = 'estimated'
+    flt!.startAt = '2026-09-19T06:00:00-06:00'
+    flt!.endAt = '2026-09-19T07:18:00-06:00'
+    flt!.provider = 'Volaris'
+    flt!.sourceUrl =
+      'https://aerodatabox.com/?origin=MEX&destination=GDL&date=2026-09-19&flight=Y4140'
+    flt!.notes =
+      'HORARIO PUBLICADO — verifica disponibilidad y reserva directamente con la aerolínea.'
+    flt!.priceObserved = undefined
+    const model = buildTripPanelFromPackage(pkg)
+    const card = [...model.flightsOut, ...model.flightsReturn].find(
+      (c) => c.externalId === flt!.externalId,
+    )
+    assert.ok(card)
+    assert.equal(card!.status, 'estimated')
+    assert.equal(card!.startAt, '2026-09-19T06:00:00-06:00')
+    assert.equal(card!.endAt, '2026-09-19T07:18:00-06:00')
+    assert.equal(card!.sourceType, 'flight_schedule')
+    assert.equal(card!.price, undefined)
+    assert.match(card!.notes ?? '', /HORARIO PUBLICADO/)
+  })
+})

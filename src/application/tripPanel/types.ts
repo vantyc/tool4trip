@@ -1,0 +1,143 @@
+/**
+ * Presentation view-model for TripPanel widgets.
+ * Pure transforms over existing package / entity JSON — no persistence changes.
+ */
+
+export type VisualStatus =
+  | 'confirmed'
+  | 'verified'
+  | 'estimated'
+  | 'user_supplied'
+  | 'pending'
+  | 'alternative'
+  | 'missing'
+
+export type TripPanelCardKind =
+  | 'flight_out'
+  | 'flight_return'
+  | 'ground'
+  | 'lodging'
+  | 'activity'
+  | 'checklist'
+  | 'note'
+  | 'source'
+  | 'missing_slot'
+
+/** Policy-derived airport desk arrival (not LLM-invented). */
+export type AirportArrivalInfo = {
+  deskAt: string
+  onlineAt: string
+  deskMinutes: number
+  onlineMinutes: number
+  scope: 'domestic' | 'international'
+  airportLabel: string
+}
+
+export type TripPanelCard = {
+  id: string
+  kind: TripPanelCardKind
+  title: string
+  status: VisualStatus
+  /** Only set when present with provenance — UI must not invent. */
+  startAt?: string
+  endAt?: string
+  origin?: string
+  destination?: string
+  provider?: string
+  price?: number
+  currency?: string
+  sourceUrl?: string
+  place?: string
+  notes?: string
+  body?: string
+  /** FlightCard only — derived from startAt via airportArrivalPolicy. */
+  airportArrival?: AirportArrivalInfo
+  /** Package externalId (stable componentId). */
+  externalId?: string
+  sourceType?: string
+  verificationStatus?: string
+  /** Raw option type for component actions. */
+  optionType?: string
+  entityKind?: 'travelOption' | 'itineraryItem' | 'checklistItem' | 'note'
+  checkedAt?: string
+  nextAction?: string
+  priceHistory?: Array<{
+    amount: number
+    currency: string
+    checkedAt: string
+    sourceUrl?: string
+  }>
+}
+
+export type IntegrityLight = 'green' | 'amber' | 'red'
+
+export type TripPanelDiagnostics = {
+  verifiedCount: number
+  pendingCount: number
+  missingCount: number
+  /** Anchored entity sourceUrls (travelOptions). */
+  sourceCount: number
+  /** Distinct URLs seen in toolTrace (consulted, not necessarily anchored). */
+  consultedSourceCount?: number
+  /** Distinct URLs backing grounded findings (claims), anchored to an entity or not. */
+  groundedFindingSourceCount?: number
+  warnings: string[]
+  /** True when Create should ask for draft confirmation. */
+  needsCreateConfirm: boolean
+  integrityLight: IntegrityLight
+}
+
+export type TripPanelHeader = {
+  title: string
+  statusLabel: string
+  origin?: string
+  destinations: string[]
+  startDate?: string
+  endDate?: string
+  days?: number
+  nights?: number
+  budgetAmount?: number
+  budgetCurrency?: string
+  budgetConfidence?: string
+  /** Sum of the chosen option. Alternatives and unpriced rows are excluded. */
+  chosenSubtotal?: number
+  amountPaid?: number
+  /** Chosen subtotal still unpaid. */
+  amountDue?: number
+  /** Pending flights, stays and transfers that have no price yet. */
+  unquotedCount?: number
+  ledgerCurrency?: string
+  progressPct: number
+}
+
+export type TripPanelModel = {
+  header: TripPanelHeader
+  diagnostics: TripPanelDiagnostics
+  flightsOut: TripPanelCard[]
+  flightsReturn: TripPanelCard[]
+  ground: TripPanelCard[]
+  lodging: TripPanelCard[]
+  activities: TripPanelCard[]
+  checklist: TripPanelCard[]
+  notes: TripPanelCard[]
+  sources: TripPanelCard[]
+  /** Short executive blurb (truncated narrative). */
+  executiveSummary?: string
+  /** Collapsible technical payload. */
+  technical?: {
+    narrative?: string
+    /** Agent/server warnings only (not integrity diagnostics). */
+    warnings: string[]
+    jsonText?: string
+  }
+}
+
+export const VISUAL_STATUS_LABEL: Record<VisualStatus, string> = {
+  confirmed: 'Confirmado',
+  verified: 'Con fuente',
+  estimated: 'Estimado',
+  user_supplied: 'Dato del viajero',
+  pending: 'Pendiente',
+  alternative: 'Alternativa',
+  missing: 'Faltante',
+}

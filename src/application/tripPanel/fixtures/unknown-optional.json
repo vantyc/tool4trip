@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "packageId": "fixture-unknown-optional",
+  "revision": 1,
+  "trip": {
+    "id": "trip-unk-1",
+    "title": "Campos opcionales",
+    "startDate": "2026-11-01",
+    "endDate": "2026-11-03",
+    "timezone": "America/Mexico_City",
+    "goals": [],
+    "status": "planned"
+  },
+  "travelOptions": [
+    {
+      "externalId": "flt-out",
+      "type": "flight",
+      "status": "researched",
+      "title": "Vuelo sin horas",
+      "origin": "MEX",
+      "destination": "MNL",
+      "verificationStatus": "unverified",
+      "sourceType": "agent"
+    }
+  ],
+  "itineraryItems": [],
+  "checklistItems": [
+    { "externalId": "chk-1", "label": "Confirmar todo" }
+  ],
+  "notes": []
+}

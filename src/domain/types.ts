@@ -1,3 +1,5 @@
+import type { BudgetRole, PriceObservation } from '../../shared/quoteLedger'
+
 /**
  * Domain model — Viajes
  *
@@ -60,10 +62,17 @@ export interface TravelGoal {
   label: string
 }
 
+export interface TripBudget {
+  /** Most the whole trip may cost, in `currency`. */
+  cap: number
+  currency: string
+}
+
 export interface Trip {
   id: string
   title: string
   destination?: string
+  budget?: TripBudget
   /** Inclusive trip range as calendar dates (YYYY-MM-DD), interpreted in Trip.timezone. */
   startDate: string
   endDate: string
@@ -242,6 +251,7 @@ export type TravelOptionSourceType =
   | 'imported'
   | 'agent'
   | 'other'
+  | 'flight_schedule'
 
 /**
  * Lightweight researched option. Never treat researched/shortlisted/selected
@@ -266,6 +276,24 @@ export interface TravelOption {
   sourceUrl?: string
   /** When the web source was last checked (ISO with offset preferred). */
   checkedAt?: string
+  /** Earlier quotes for this same option, oldest first. Not part of the subtotal. */
+  priceHistory?: PriceObservation[]
+  /** primary counts toward the chosen subtotal; alternative and pending do not. */
+  budgetRole?: BudgetRole
+  /**
+   * Set false when the price is the same ticket already counted on another row
+   * (return leg). The amount still displays.
+   */
+  countsInBudget?: boolean
+  /** Amount already paid toward this option. Unset means nothing paid. */
+  amountPaid?: number
+  /** What to do next. Not a booking. */
+  nextAction?: string
+  /**
+   * Lodging without dates yet: the stay falls somewhere inside these local
+   * dates (YYYY-MM-DD). Cleared once startAt/endAt are set.
+   */
+  stayWindow?: { from: string; to: string }
   verificationStatus?: VerificationStatus
   sourceType: TravelOptionSourceType
   notes?: string

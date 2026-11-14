@@ -207,7 +207,7 @@ describe('InMemoryJobStore + JobWorker', () => {
       now: () => now,
     })
     const job = store.create(sampleRequest(), { requestId: 'req-ttl' })
-    store.markSucceeded(job.jobId, validProposal())
+    store.markSucceeded(job.jobId, { proposal: validProposal() })
     assert.ok(store.get(job.jobId))
     now += 1_001
     assert.equal(store.purgeExpired(), 1)

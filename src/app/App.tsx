@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Link, Navigate, Route, Routes } from 'react-router-dom'
 import { db } from '../data/db'
 import { ConnectionIndicator } from '../ui/ConnectionIndicator'
 import { AskTravelPage } from '../ui/pages/AskTravelPage'
+import { NewTravelPage } from '../ui/pages/NewTravelPage'
 import { BookingsPage } from '../ui/pages/BookingsPage'
 import { ChecklistPage } from '../ui/pages/ChecklistPage'
 import { DocumentsPage } from '../ui/pages/DocumentsPage'
@@ -14,11 +15,20 @@ import { OptionsPage } from '../ui/pages/OptionsPage'
 import { TripLayout } from '../ui/pages/TripLayout'
 import { TripListPage } from '../ui/pages/TripListPage'
 import { TripOverviewPage } from '../ui/pages/TripOverviewPage'
+import { ThemeToggle } from '../ui/ThemeToggle'
+import { Glyph } from '../ui/tripBoard/Glyph'
+import { TripBoardPage } from '../ui/tripBoard/TripBoardPage'
+import { useReadOnly } from '../ui/useReadOnly'
 import './App.css'
 
 export function App() {
   const [dbReady, setDbReady] = useState(false)
   const [dbError, setDbError] = useState<string | null>(null)
+  const readOnly = useReadOnly()
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('read-only', readOnly)
+  }, [readOnly])
 
   useEffect(() => {
     let cancelled = false
@@ -58,25 +68,36 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div className="app-header-top">
-          <p className="brand">Tool4Trip</p>
-          <div className="app-header-meta">
-            <ConnectionIndicator />
-            <a className="logout-link" href="/logout">
-              Cerrar sesión
-            </a>
-          </div>
+        <Link to="/" className="brand" title="Mis viajes">
+          <span className="brand-mark" aria-hidden="true">
+            <Glyph name="plane" rotate={45} />
+          </span>
+          Tool4Trip
+        </Link>
+        <div className="app-header-meta">
+          {readOnly && (
+            <span className="read-only-chip" title="Puedes ver este viaje, pero no cambiarlo">
+              Solo lectura
+            </span>
+          )}
+          <ThemeToggle />
+          <ConnectionIndicator />
+          <a className="logout-link" href="/logout">
+            Cerrar sesión
+          </a>
         </div>
-        <p className="tagline">Fuente operativa de tu viaje</p>
       </header>
 
       <main className="app-main">
         <Routes>
           <Route path="/" element={<TripListPage />} />
-          <Route path="/ask" element={<AskTravelPage />} />
-          <Route path="/import" element={<ImportResearchPage />} />
+          <Route path="/new" element={readOnly ? <Navigate to="/" replace /> : <NewTravelPage />} />
+          <Route path="/ask" element={readOnly ? <Navigate to="/" replace /> : <AskTravelPage />} />
+          <Route path="/import" element={readOnly ? <Navigate to="/" replace /> : <ImportResearchPage />} />
           <Route path="/trips/:tripId" element={<TripLayout />}>
-            <Route index element={<TripOverviewPage />} />
+            <Route index element={<TripBoardPage />} />
+            <Route path="tablero" element={<Navigate to=".." relative="path" replace />} />
+            <Route path="detalle" element={<TripOverviewPage />} />
             <Route path="options" element={<OptionsPage />} />
             <Route path="bookings" element={<BookingsPage />} />
             <Route path="itinerary" element={<ItineraryPage />} />

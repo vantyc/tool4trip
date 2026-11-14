@@ -28,6 +28,9 @@ export async function buildProposal(
   deps: BuildProposalDeps = {},
 ): Promise<AgentProposal> {
   const result = await buildProposalWithMeta(req, deps)
+  if (!result.proposal) {
+    throw new Error('buildProposal: expected AgentProposal (not component_action)')
+  }
   return result.proposal
 }
 

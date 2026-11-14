@@ -41,6 +41,19 @@ spec:
                 secretKeyRef:
                   name: tool4trip-session-auth
                   key: SESSION_SECRET
+            # Read-only guest (scripts/tool4trip-guest-access.sh); absent = no guest.
+            - name: AUTH_GUEST_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: tool4trip-session-auth
+                  key: AUTH_GUEST_USERNAME
+                  optional: true
+            - name: AUTH_GUEST_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: tool4trip-session-auth
+                  key: AUTH_GUEST_PASSWORD_HASH
+                  optional: true
           readinessProbe:
             httpGet:
               path: /healthz
