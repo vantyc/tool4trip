@@ -713,11 +713,7 @@ export async function ensureFilipinasEtravelQr(documents: {
 
 /** Load the Filipinas Nov 2026 trip seed into IndexedDB. */
 export async function seedFilipinasTrip(services: {
-  trips: { save: (trip: Trip) => Promise<unknown> }
-  travelOptions: { save: (opt: TravelOption) => Promise<unknown> }
-  packages: { save: (pkg: PackageImport) => Promise<unknown> }
-  checklist: { save: (item: ChecklistItem) => Promise<unknown> }
-  notes: { save: (note: Note) => Promise<unknown> }
+  packages: { importPackage: (raw: unknown) => Promise<unknown> }
   documents: {
     get: (id: string) => Promise<{ id: string } | undefined>
     save: (
@@ -737,24 +733,18 @@ export async function seedFilipinasTrip(services: {
 }): Promise<string> {
   const bundle = filipinasNov2026Bundle()
   
-  await services.trips.save(bundle.trip)
+  // Import the complete package (trip + options + checklist + notes)
+  await services.packages.importPackage({
+    schemaVersion: 1,
+    packageId: bundle.packageImports[0].id,
+    revision: bundle.packageImports[0].revision,
+    trip: bundle.trip,
+    travelOptions: bundle.travelOptions,
+    checklistItems: bundle.checklistItems,
+    notes: bundle.notes,
+  })
   
-  for (const opt of bundle.travelOptions) {
-    await services.travelOptions.save(opt)
-  }
-  
-  for (const pkg of bundle.packageImports) {
-    await services.packages.save(pkg)
-  }
-  
-  for (const item of bundle.checklistItems) {
-    await services.checklist.save(item)
-  }
-  
-  for (const note of bundle.notes) {
-    await services.notes.save(note)
-  }
-  
+  // Load the eTravel QR document
   await ensureFilipinasEtravelQr(services.documents)
   
   return bundle.trip.id
