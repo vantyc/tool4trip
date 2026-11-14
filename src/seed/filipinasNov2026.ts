@@ -710,3 +710,52 @@ export async function ensureFilipinasEtravelQr(documents: {
   )
   return true
 }
+
+/** Load the Filipinas Nov 2026 trip seed into IndexedDB. */
+export async function seedFilipinasTrip(services: {
+  trips: { save: (trip: Trip) => Promise<unknown> }
+  travelOptions: { save: (opt: TravelOption) => Promise<unknown> }
+  packages: { save: (pkg: PackageImport) => Promise<unknown> }
+  checklist: { save: (item: ChecklistItem) => Promise<unknown> }
+  notes: { save: (note: Note) => Promise<unknown> }
+  documents: {
+    get: (id: string) => Promise<{ id: string } | undefined>
+    save: (
+      meta: {
+        id: string
+        tripId: string
+        name: string
+        type: 'other'
+        mimeType: string
+        notes?: string
+        capturedAt?: string
+        syncStatus?: 'local' | 'synced'
+      },
+      blob: Blob,
+    ) => Promise<unknown>
+  }
+}): Promise<string> {
+  const bundle = filipinasNov2026Bundle()
+  
+  await services.trips.save(bundle.trip)
+  
+  for (const opt of bundle.travelOptions) {
+    await services.travelOptions.save(opt)
+  }
+  
+  for (const pkg of bundle.packageImports) {
+    await services.packages.save(pkg)
+  }
+  
+  for (const item of bundle.checklistItems) {
+    await services.checklist.save(item)
+  }
+  
+  for (const note of bundle.notes) {
+    await services.notes.save(note)
+  }
+  
+  await ensureFilipinasEtravelQr(services.documents)
+  
+  return bundle.trip.id
+}

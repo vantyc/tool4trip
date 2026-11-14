@@ -3,6 +3,10 @@ import { Link } from 'react-router-dom'
 import { services } from '../../application'
 import { DEMO_TRIP_ID, seedDemoTrip } from '../../seed/demoSanMiguel'
 import {
+  FILIPINAS_TRIP_ID,
+  seedFilipinasTrip,
+} from '../../seed/filipinasNov2026'
+import {
   cancelTripDeletion,
   confirmTripDeletion,
   initialTripDeletion,
@@ -49,6 +53,20 @@ export function TripListPage() {
     }
   }
 
+  async function handleFilipinas() {
+    setBusy(true)
+    setMessage(null)
+    try {
+      await seedFilipinasTrip(services)
+      reload()
+      setMessage('Seed Filipinas noviembre 2026 cargado.')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error al cargar seed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <section className="page">
       <h1>Tool4Trip</h1>
@@ -81,6 +99,15 @@ export function TripListPage() {
         >
           {busy ? 'Cargando…' : 'Cargar seed San Miguel (FICTICIO)'}
         </button>
+        <button
+          type="button"
+          data-write
+          onClick={() => void handleFilipinas()}
+          disabled={busy || !online}
+          style={{ marginTop: '8px' }}
+        >
+          {busy ? 'Cargando…' : 'Cargar Filipinas nov 2026'}
+        </button>
       </div>
 
       {message && <p className="flash">{message}</p>}
@@ -98,63 +125,60 @@ export function TripListPage() {
           aria-labelledby="trip-delete-title"
         >
           <h3 id="trip-delete-title">¿Eliminar este viaje?</h3>
-          <p>
-            <strong>{deletion.pending.title}</strong>
-          </p>
-          <p className="muted">Esta acción no se puede deshacer.</p>
-          <div className="actions">
+          <p>{deletion.pending.title}</p>
+          <div className="ask-actions">
             <button
               type="button"
-              onClick={() => setDeletion((s) => cancelTripDeletion(s))}
               disabled={deletion.deleting}
+              onClick={() => void handleDeleteConfirmed()}
             >
-              Cancelar
+              {deletion.deleting ? 'Eliminando…' : 'Sí, eliminar'}
             </button>
             <button
               type="button"
-              className="danger"
-              onClick={() => void handleDeleteConfirmed()}
-              disabled={deletion.deleting || !online}
+              disabled={deletion.deleting}
+              onClick={() => setDeletion(cancelTripDeletion(deletion))}
             >
-              {deletion.deleting ? 'Eliminando…' : 'Eliminar'}
+              Cancelar
             </button>
           </div>
         </div>
       )}
 
-      {loading ? (
-        <p className="muted">Cargando viajes…</p>
-      ) : trips.length === 0 ? (
-        <p className="muted">
+      {loading && <p>Cargando viajes…</p>}
+      {trips.length === 0 && !loading && (
+        <p className="not-found">
           No hay viajes en la nube. Usa Nuevo viaje o importa investigación.
         </p>
-      ) : (
+      )}
+      {trips.length > 0 && (
         <ul className="trip-list">
-          {trips.map((trip) => (
-            <li key={trip.id} className="trip-row">
-              <Link to={`/trips/${trip.id}`}>
-                <strong>{trip.title}</strong>
-                <span>
-                  {trip.startDate} → {trip.endDate}
+          {trips.map((t) => (
+            <li
+              key={t.id}
+              className={
+                t.id === deletion.pending?.id ? 'trip-list-item pending' : ''
+              }
+            >
+              <Link to={`/${t.id}`} className="trip-link">
+                <strong>{t.title}</strong>
+                <span className="trip-dates">
+                  {t.startDate} – {t.endDate}
                 </span>
-                {trip.id === DEMO_TRIP_ID && (
-                  <span className="badge">DEMO</span>
-                )}
               </Link>
-              <button
-                type="button"
-                className="trip-delete"
-                data-write
-                aria-label={`Eliminar ${trip.title}`}
-                disabled={!online || deletion.deleting}
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setDeletion((s) => requestTripDeletion(s, trip))
-                }}
-              >
-                Eliminar
-              </button>
+              {t.id !== DEMO_TRIP_ID && t.id !== FILIPINAS_TRIP_ID && (
+                <button
+                  type="button"
+                  className="trip-delete-trigger"
+                  aria-label={`Eliminar ${t.title}`}
+                  disabled={deletion.pending !== null}
+                  onClick={() =>
+                    setDeletion(requestTripDeletion(deletion, t))
+                  }
+                >
+                  Eliminar
+                </button>
+              )}
             </li>
           ))}
         </ul>
