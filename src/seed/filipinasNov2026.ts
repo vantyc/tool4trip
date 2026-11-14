@@ -711,7 +711,60 @@ export async function ensureFilipinasEtravelQr(documents: {
   return true
 }
 
-/** Load the Filipinas Nov 2026 trip seed into IndexedDB. */
+/** Map seed bundle → TripPackage v1 (agent statuses only; booked stays PWA decisions). */
+export function filipinasNov2026Package() {
+  const bundle = filipinasNov2026Bundle()
+  const pkgStatus = (s: string) =>
+    s === 'shortlisted' || s === 'researched' ? s : 'shortlisted'
+  return {
+    schemaVersion: 1 as const,
+    packageId: FILIPINAS_PACKAGE_ID,
+    revision: bundle.packageImports[0]!.revision,
+    generatedAt: bundle.packageImports[0]!.generatedAt,
+    trip: {
+      title: bundle.trip.title,
+      destination: bundle.trip.destination,
+      startDate: bundle.trip.startDate,
+      endDate: bundle.trip.endDate,
+      timezone: bundle.trip.timezone,
+      goals: bundle.trip.goals,
+      notes: bundle.trip.notes,
+    },
+    travelOptions: bundle.travelOptions.map((o) => ({
+      externalId: o.externalId ?? o.id,
+      type: o.type,
+      status: pkgStatus(o.status) as 'researched' | 'shortlisted',
+      title: o.title,
+      provider: o.provider,
+      startAt: o.startAt,
+      endAt: o.endAt,
+      origin: o.origin,
+      destination: o.destination,
+      address: o.address,
+      phone: o.phone,
+      priceObserved: o.priceObserved,
+      currency: o.currency,
+      sourceUrl: o.sourceUrl,
+      checkedAt: o.checkedAt,
+      verificationStatus: o.verificationStatus,
+      sourceType: o.sourceType ?? 'cursor',
+      notes: o.notes,
+    })),
+    checklistItems: bundle.checklistItems.map((c) => ({
+      externalId: c.id,
+      label: c.label,
+      dueAt: c.dueAt,
+      sortOrder: c.sortOrder,
+    })),
+    notes: bundle.notes.map((n) => ({
+      externalId: n.id,
+      title: n.title,
+      body: n.body,
+    })),
+  }
+}
+
+/** Import Filipinas package into cloud SoT + attach eTravel QR in Docs. */
 export async function seedFilipinasTrip(services: {
   packages: { importPackage: (raw: unknown) => Promise<unknown> }
   documents: {
@@ -731,21 +784,7 @@ export async function seedFilipinasTrip(services: {
     ) => Promise<unknown>
   }
 }): Promise<string> {
-  const bundle = filipinasNov2026Bundle()
-  
-  // Import the complete package (trip + options + checklist + notes)
-  await services.packages.importPackage({
-    schemaVersion: 1,
-    packageId: bundle.packageImports[0].id,
-    revision: bundle.packageImports[0].revision,
-    trip: bundle.trip,
-    travelOptions: bundle.travelOptions,
-    checklistItems: bundle.checklistItems,
-    notes: bundle.notes,
-  })
-  
-  // Load the eTravel QR document
+  await services.packages.importPackage(filipinasNov2026Package())
   await ensureFilipinasEtravelQr(services.documents)
-  
-  return bundle.trip.id
+  return FILIPINAS_TRIP_ID
 }
