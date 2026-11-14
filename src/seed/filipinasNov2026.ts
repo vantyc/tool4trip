@@ -26,14 +26,18 @@ const LAX_MNL =
   'https://www.skyscanner.com.mx/transporte/vuelos/lax/mnl/261114/261129/?adultsv2=1&cabinclass=economy&currency=MXN&preferdirects=true'
 const MEX_LAX =
   'https://www.skyscanner.com.mx/transporte/vuelos/mex/lax/261114/261129/?adultsv2=1&cabinclass=economy&currency=MXN&preferdirects=true'
-const MNL_ENI =
-  'https://www.kayak.com.mx/flights/MNL-ENI/2026-11-19?sort=duration_a'
-const ENI_MNL =
-  'https://www.kayak.com.mx/flights/ENI-MNL/2026-11-27?sort=duration_a'
+const MNL_CEB =
+  'https://www.kayak.com.mx/flights/MNL-CEB/2026-11-19?sort=duration_a'
+const CEB_ENI =
+  'https://www.kayak.com.mx/flights/CEB-ENI/2026-11-22?sort=duration_a'
+const ENI_CEB =
+  'https://www.kayak.com.mx/flights/ENI-CEB/2026-11-25?sort=duration_a'
+const CEB_MNL =
+  'https://www.kayak.com.mx/flights/CEB-MNL/2026-11-25?sort=duration_a'
 const CRK_ENI =
-  'https://www.kayak.com.mx/flights/CRK-ENI/2026-11-19?sort=price_a'
+  'https://www.kayak.com.mx/flights/CRK-ENI/2026-11-22?sort=price_a'
 const ENI_CRK =
-  'https://www.kayak.com.mx/flights/ENI-CRK/2026-11-27?sort=price_a'
+  'https://www.kayak.com.mx/flights/ENI-CRK/2026-11-25?sort=price_a'
 const SEDA =
   'https://ayalalandhospitality.com/en/seda/hotels/seda-bgc-taguig/offers/festive-rooms'
 const OKURA =
@@ -46,7 +50,11 @@ const SEDA_LIO =
 const KANSO_CHANGE = '2026-11-14T04:07:00-06:00'
 /** United profile primary email verified (for booking confirmations). */
 const UNITED_EMAIL_CHANGE = '2026-11-14T04:50:00-06:00'
+/** eTravel QR updated to arrival 17 Nov UA809 (ref F00NKZMH64BZ). */
+const ETRAVEL_OK = '2026-11-14T06:56:00-06:00'
 const UNITED_PRIMARY_EMAIL = 'rafael.carrasco.us@gmail.com'
+export const FILIPINAS_ETRAVEL_DOC_ID = 'filipinas-nov-2026-doc-etravel'
+export const FILIPINAS_ETRAVEL_QR_URL = '/seed/filipinas-etravel-F00NKZMH64BZ.png'
 
 type Row = Omit<
   TravelOption,
@@ -84,15 +92,15 @@ export function filipinasNov2026Bundle(): {
       id: 'filipinas-nov-2026-01-ua822',
       externalId: 'filipinas-nov-2026-01-ua822',
       type: 'flight',
-      status: 'selected',
+      status: 'booked',
       budgetRole: 'primary',
       amountPaid: 0,
-      title: 'United UA822 CDMX → San Francisco',
+      title: 'United UA822 CDMX → San Francisco · HNW4J6',
       provider: 'United',
       origin: 'MEX',
       destination: 'SFO',
-      startAt: '2026-11-14T05:45:00-06:00',
-      endAt: '2026-11-14T08:44:00-08:00',
+      startAt: '2026-11-16T05:45:00-06:00',
+      endAt: '2026-11-16T08:44:00-08:00',
       priceObserved: 13105,
       priceHistory: [
         {
@@ -105,40 +113,39 @@ export function filipinasNov2026Bundle(): {
       sourceUrl: MEX_SFO_28,
       verificationStatus: 'verified',
       nextAction:
-        'Antes de pagar, confirmar que la maleta de 23 kg sigue en 13,105 MXN. No reservar.',
+        'Reenviar eTicket HNW4J6 a Gmail. Confirmar asiento $59.99 y maleta en la reserva.',
       notes:
-        'Boleto MEX–SFO 14–28. Basic Economy son 11,238 MXN y solo incluyen un artículo personal. Con una maleta de 23 kg el boleto queda en 13,105. Economy con mano y asiento, misma consulta: 13,389, todavía sin esa maleta. La segunda maleta de este tramo quedó sin cotización. Hueco hasta UA809: 5 h 21 min. Cotizado, sin reserva ni pago.',
+        'Comprado HNW4J6. Ida 16 nov MEX→SFO. Hueco hasta UA809: 5 h 21 min. Precio de referencia cotizado 13,105 MXN con maleta (confirmar en boleto).',
     }),
     row({
       id: 'filipinas-nov-2026-02-ua809',
       externalId: 'filipinas-nov-2026-02-ua809',
       type: 'flight',
-      status: 'selected',
+      status: 'booked',
       budgetRole: 'primary',
       amountPaid: 0,
-      title: 'United UA809 San Francisco → Manila',
+      title: 'United UA809 San Francisco → Manila · HNW4J6',
       provider: 'United',
       origin: 'SFO',
       destination: 'MNL',
-      startAt: '2026-11-14T14:05:00-08:00',
-      endAt: '2026-11-15T21:10:00+08:00',
+      startAt: '2026-11-16T14:05:00-08:00',
+      endAt: '2026-11-17T21:10:00+08:00',
       priceObserved: 18523,
       sourceUrl: SFO_MNL_28,
       verificationStatus: 'verified',
-      nextAction:
-        'Al comprar, elegir pasillo. El asiento va incluido. No reservar.',
+      nextAction: 'Confirmar pasillo y eTicket en Manage Trip HNW4J6.',
       notes:
-        'Boleto SFO–MNL 14–28, directo, 15 h 05 min. Incluye dos maletas de 23 kg, una de mano y artículo personal. Asiento y cambios gratis, sin reembolso. El regreso UA190 va en el mismo boleto y no se suma otra vez. Cotizado, sin reserva ni pago.',
+        'Comprado HNW4J6. SFO→MNL llegada 17 nov 21:10 MNL T3. Mismo boleto que UA190 de regreso.',
     }),
     row({
       id: 'filipinas-nov-2026-03-ua190',
       externalId: 'filipinas-nov-2026-03-ua190',
       type: 'flight',
-      status: 'selected',
+      status: 'booked',
       budgetRole: 'primary',
       countsInBudget: false,
       amountPaid: 0,
-      title: 'Regreso United UA190 Manila → San Francisco',
+      title: 'Regreso United UA190 Manila → San Francisco · HNW4J6',
       provider: 'United',
       origin: 'MNL',
       destination: 'SFO',
@@ -147,20 +154,19 @@ export function filipinasNov2026Bundle(): {
       priceObserved: 18523,
       sourceUrl: SFO_MNL_28,
       verificationStatus: 'verified',
-      nextAction:
-        'Confirmar que el hueco hasta UA817 sigue en 6 h 39 min. No reservar.',
+      nextAction: 'Confirmar tramo de regreso en eTicket HNW4J6 (hora 09:55).',
       notes:
-        'Mismo boleto que UA809, 18,523 MXN. No se suma otra vez. Directo, 12 h 40 min. Sale de Manila el sábado 28 a las 09:55.',
+        'Mismo boleto HNW4J6 que UA809. Sale de Manila el sábado 28 a las 09:55 (confirmar en reserva).',
     }),
     row({
       id: 'filipinas-nov-2026-04-ua817',
       externalId: 'filipinas-nov-2026-04-ua817',
       type: 'flight',
-      status: 'selected',
+      status: 'booked',
       budgetRole: 'primary',
       countsInBudget: false,
       amountPaid: 0,
-      title: 'Regreso United UA817 San Francisco → CDMX',
+      title: 'Regreso United UA817 San Francisco → CDMX · HNW4J6',
       provider: 'United',
       origin: 'SFO',
       destination: 'MEX',
@@ -169,9 +175,9 @@ export function filipinasNov2026Bundle(): {
       priceObserved: 13105,
       sourceUrl: MEX_SFO_28,
       verificationStatus: 'verified',
-      nextAction: 'Llegada elegida a CDMX: sábado 28 a las 19:35. No reservar.',
+      nextAction: 'Confirmar llegada CDMX ~19:35 en eTicket HNW4J6.',
       notes:
-        'Mismo boleto que UA822, 13,105 MXN con una maleta de 23 kg. No se suma otra vez. Aterriza en CDMX el sábado 28 a las 19:35.',
+        'Mismo boleto HNW4J6 que UA822. Aterriza en CDMX el sábado 28 a las 19:35 (confirmar en reserva).',
     }),
     row({
       id: 'filipinas-nov-2026-alt-united-unico',
@@ -269,102 +275,145 @@ export function filipinasNov2026Bundle(): {
         'AM646 07:25–09:45 el 14. AM645 sale de LAX el 29 a las 13:48 y llega a CDMX a las 19:35. eDreams, 11,357 MXN, sin mano ni documentada. El hueco con PR112 es de 5 h 43 min. No entra al subtotal.',
     }),
     row({
-      id: 'filipinas-nov-2026-p-mnl-eni-ceb',
-      externalId: 'filipinas-nov-2026-p-mnl-eni-ceb',
+      id: 'filipinas-nov-2026-p-mnl-ceb',
+      externalId: 'filipinas-nov-2026-p-mnl-ceb',
       type: 'flight',
-      status: 'researched',
-      budgetRole: 'pending',
-      title: 'Pendiente — Manila → El Nido vía Cebu, 19 nov 2026',
+      status: 'booked',
+      budgetRole: 'primary',
+      amountPaid: 7402.32,
+      countsInBudget: false,
+      title: 'Cebu Pacific 5J 569 Manila → Cebú · ZLW9UW · 19 nov 17:45–19:20',
       provider: 'Cebu Pacific',
       origin: 'MNL',
-      destination: 'ENI',
-      sourceUrl: MNL_ENI,
-      verificationStatus: 'unverified',
-      currency: undefined,
-      nextAction:
-        'Cotizar en MXN, con maleta, y anotar si los dos tramos van en un solo boleto.',
+      destination: 'CEB',
+      // Times live in title/notes so lodging stays stay merged on the board.
+      priceObserved: 7402.32,
+      currency: 'PHP',
+      sourceUrl: MNL_CEB,
+      verificationStatus: 'verified',
+      nextAction: 'Asiento Unassigned (opcional).',
       notes:
-        'Sin cotización en esta carga. Evitar autobús, van compartida y lancha. La búsqueda es Manila–El Nido el 19 de noviembre (traslado movido: Airbnb Makati queda hasta el 19).',
+        '19 nov 2026 · MNL T3 17:45 → CEB T1 19:20 · TXN 303911537 · Payment RXMWD1.',
     }),
     row({
-      id: 'filipinas-nov-2026-p-eni-mnl-ceb',
-      externalId: 'filipinas-nov-2026-p-eni-mnl-ceb',
+      id: 'filipinas-nov-2026-p-ceb-eni',
+      externalId: 'filipinas-nov-2026-p-ceb-eni',
       type: 'flight',
-      status: 'researched',
-      budgetRole: 'pending',
-      title: 'Pendiente — El Nido → Manila vía Cebu, 27 nov 2026',
-      provider: 'Cebu Pacific',
-      origin: 'ENI',
-      destination: 'MNL',
-      sourceUrl: ENI_MNL,
-      verificationStatus: 'unverified',
-      currency: undefined,
-      nextAction:
-        'Cotizar el regreso del 27 para dormir esa noche y la siguiente en Manila.',
+      status: 'booked',
+      budgetRole: 'primary',
+      amountPaid: 12432.32,
+      countsInBudget: false,
+      title: 'Cebgo DG6254 Cebú → El Nido · GWSE2U · 22 nov 18:50–20:35',
+      provider: 'Cebu Pacific / Cebgo',
+      origin: 'CEB',
+      destination: 'ENI',
+      priceObserved: 12432.32,
+      currency: 'PHP',
+      sourceUrl: CEB_ENI,
+      verificationStatus: 'verified',
+      nextAction: 'Asiento Unassigned (opcional).',
       notes:
-        'Sin cotización en esta carga. Tiene que dejar la noche del 27 en Manila antes del internacional del 28.',
+        '22 nov 2026 · CEB T1 18:50 → ENI 20:35 · TXN 303911850 · Payment 7M5K2O.',
+    }),
+    row({
+      id: 'filipinas-nov-2026-p-eni-ceb',
+      externalId: 'filipinas-nov-2026-p-eni-ceb',
+      type: 'flight',
+      status: 'booked',
+      budgetRole: 'primary',
+      amountPaid: 0,
+      countsInBudget: false,
+      title: 'Cebgo DG6257 El Nido → Cebú · BG8LUF · 25 nov 10:45–12:30',
+      provider: 'Cebu Pacific / Cebgo',
+      origin: 'ENI',
+      destination: 'CEB',
+      priceObserved: 19086.24,
+      currency: 'PHP',
+      sourceUrl: ENI_CEB,
+      verificationStatus: 'verified',
+      nextAction: 'Conexión 2 h en CEB T1 hacia 5J 552.',
+      notes:
+        '25 nov 2026 · ENI 10:45 → CEB 12:30. Misma reserva BG8LUF que 5J 552 · total PHP 19,086.24 · TXN 303912379.',
+    }),
+    row({
+      id: 'filipinas-nov-2026-p-ceb-mnl',
+      externalId: 'filipinas-nov-2026-p-ceb-mnl',
+      type: 'flight',
+      status: 'booked',
+      budgetRole: 'primary',
+      amountPaid: 19086.24,
+      countsInBudget: false,
+      title: 'Cebu Pacific 5J 552 Cebú → Manila · BG8LUF · 25 nov 14:30–16:05',
+      provider: 'Cebu Pacific',
+      origin: 'CEB',
+      destination: 'MNL',
+      priceObserved: 19086.24,
+      currency: 'PHP',
+      sourceUrl: CEB_MNL,
+      verificationStatus: 'verified',
+      nextAction: 'Llegada MNL T3 16:05 → hotel Manila 2ª vez.',
+      notes:
+        '25 nov 2026 · CEB 14:30 → MNL 16:05. Misma reserva BG8LUF que DG6257 · conexión 2 h.',
     }),
     row({
       id: 'filipinas-nov-2026-p-crk-eni',
       externalId: 'filipinas-nov-2026-p-crk-eni',
       type: 'flight',
       status: 'researched',
-      budgetRole: 'pending',
-      title: 'Pendiente — Clark → El Nido directo, 19 nov 2026',
+      budgetRole: 'alternative',
+      title: 'Alternativa no elegida — Clark → El Nido, 22 nov',
       provider: 'Cebgo',
       origin: 'CRK',
       destination: 'ENI',
       sourceUrl: CRK_ENI,
       verificationStatus: 'unverified',
       currency: undefined,
-      nextAction: 'Cotizar el directo y cruzarlo con el auto privado Manila–Clark.',
-      notes:
-        'Sin cotización en esta carga. Es la otra ruta, separada de la de Cebu. Fecha movida al 19 por el Airbnb Makati 17–19.',
+      nextAction: 'No usar: ruta elegida es Cebú.',
+      notes: 'Ruta Clark descartada. Itinerario real: CEB→ENI DG6254 el 22.',
     }),
     row({
       id: 'filipinas-nov-2026-p-eni-crk',
       externalId: 'filipinas-nov-2026-p-eni-crk',
       type: 'flight',
       status: 'researched',
-      budgetRole: 'pending',
-      title: 'Pendiente — El Nido → Clark directo, 27 nov 2026',
+      budgetRole: 'alternative',
+      title: 'Alternativa no elegida — El Nido → Clark, 25 nov',
       provider: 'Cebgo',
       origin: 'ENI',
       destination: 'CRK',
       sourceUrl: ENI_CRK,
       verificationStatus: 'unverified',
       currency: undefined,
-      nextAction: 'Cotizar el directo del 27 y el auto Clark–Manila de esa noche.',
-      notes: 'Sin cotización en esta carga.',
+      nextAction: 'No usar: ruta elegida es Cebú.',
+      notes: 'Ruta Clark descartada. Itinerario real: ENI→CEB→MNL el 25.',
     }),
     row({
       id: 'filipinas-nov-2026-p-car-mnl-crk',
       externalId: 'filipinas-nov-2026-p-car-mnl-crk',
       type: 'transfer',
       status: 'researched',
-      budgetRole: 'pending',
-      title: 'Pendiente — auto privado Manila → Clark, 19 nov 2026',
+      budgetRole: 'alternative',
+      title: 'Alternativa no elegida — auto Manila → Clark',
       origin: 'Manila',
       destination: 'CRK',
       verificationStatus: 'unverified',
       currency: undefined,
-      nextAction: 'Cotizar sedan privado para el 19. Sin autobús ni van compartida.',
-      notes:
-        'Sin cotización para esa fecha. No usar una tarifa publicada de otro día. Sale tras el check-out de Kanso (19 nov).',
+      nextAction: 'No usar.',
+      notes: 'Descartado: se vuela MNL→CEB el 19 (ZLW9UW).',
     }),
     row({
       id: 'filipinas-nov-2026-p-car-crk-mnl',
       externalId: 'filipinas-nov-2026-p-car-crk-mnl',
       type: 'transfer',
       status: 'researched',
-      budgetRole: 'pending',
-      title: 'Pendiente — auto privado Clark → Manila, 27 nov 2026',
+      budgetRole: 'alternative',
+      title: 'Alternativa no elegida — auto Clark → Manila',
       origin: 'CRK',
       destination: 'Manila',
       verificationStatus: 'unverified',
       currency: undefined,
-      nextAction: 'Cotizar sedan privado del 27 para llegar al hotel de Manila.',
-      notes: 'Sin cotización para esa fecha.',
+      nextAction: 'No usar.',
+      notes: 'Descartado: se vuela CEB→MNL el 25 (BG8LUF).',
     }),
     row({
       id: 'filipinas-nov-2026-p-hotel-mnl-15',
@@ -372,7 +421,8 @@ export function filipinasNov2026Bundle(): {
       type: 'lodging',
       status: 'booked',
       budgetRole: 'primary',
-      amountPaid: 0,
+      amountPaid: 66.69,
+      countsInBudget: false,
       title: 'Airbnb Kanso 簡素 Makati Home, 17 al 19 nov 2026',
       provider: 'Airbnb — Abyzz y Gavt',
       destination: 'Makati',
@@ -381,13 +431,33 @@ export function filipinasNov2026Bundle(): {
       endAt: '2026-11-19T11:00:00+08:00',
       checkedAt: KANSO_CHANGE,
       verificationStatus: 'verified',
-      currency: undefined,
+      currency: 'USD',
       nextAction:
-        'Check-in autónomo ~23:00 ok. Instrucciones (caja de llaves) llegan un día antes. Otro cambio de fecha = política de cancelación estándar.',
+        'Check-in ~23:00 ok. Verificar reembolso US$53.76 en VISA •4146. HM49PCXDDQ.',
       notes:
-        'Cambio de fecha autorizado por Abyzz y Gavt el 14 nov 2026 como cortesía única (cancelaciones de vuelos). Reserva Airbnb: 17–19 nov. Antes la ventana investigada era 15–17 (Seda/Okura). Seda: ' +
+        'Confirmación HM49PCXDDQ / recibo RCDNTK3F2W. Total US$66.69 tras cambio 17–19. Seda/Okura ya no aplican. ' +
         SEDA +
-        `. Okura: ${OKURA}.`,
+        ` · ${OKURA}.`,
+    }),
+    row({
+      id: 'filipinas-nov-2026-p-hotel-ceb',
+      externalId: 'filipinas-nov-2026-p-hotel-ceb',
+      type: 'lodging',
+      status: 'booked',
+      budgetRole: 'primary',
+      amountPaid: 0,
+      title: 'Airbnb Sleek Studio Cebú, 19 al 22 nov 2026',
+      provider: 'Airbnb',
+      destination: 'Cebú',
+      address: 'Cebu City · Steps from Ayala',
+      startAt: '2026-11-19T15:00:00+08:00',
+      endAt: '2026-11-22T11:00:00+08:00',
+      checkedAt: ETRAVEL_OK,
+      verificationStatus: 'verified',
+      currency: undefined,
+      nextAction: 'Anotar código HM… y monto del recibo Gmail.',
+      notes:
+        'Confirmado en Gmail (recibo 19–22 nov + reminder 12 nov). Código y monto pendientes de captura.',
     }),
     row({
       id: 'filipinas-nov-2026-p-hotel-mnl-27',
@@ -395,18 +465,18 @@ export function filipinasNov2026Bundle(): {
       type: 'lodging',
       status: 'researched',
       budgetRole: 'pending',
-      title: 'Pendiente — hotel en Manila, 27 al 28 nov 2026',
+      title: 'Pendiente — hotel en Manila, 25 al 28 nov 2026',
       provider: 'Seda BGC',
       destination: 'Manila',
       address: 'Bonifacio Global City, Taguig',
-      startAt: '2026-11-27T15:00:00+08:00',
+      startAt: '2026-11-25T15:00:00+08:00',
       endAt: '2026-11-28T07:00:00+08:00',
       sourceUrl: SEDA,
       verificationStatus: 'unverified',
       currency: undefined,
       nextAction:
-        'Cotizar la noche del 27, con salida el 28 antes de UA190 a las 09:55.',
-      notes: `Una noche. El vuelo internacional sale de Manila el 28 a las 09:55. Okura: ${OKURA}. Sin cotización.`,
+        'Cotizar 25–28 (llegas MNL ~16:05 el 25; sale UA190 el 28 a las 09:55).',
+      notes: `Tres noches. Okura: ${OKURA}. Sin cotización.`,
     }),
     row({
       id: 'filipinas-nov-2026-p-hotel-eni',
@@ -414,17 +484,17 @@ export function filipinasNov2026Bundle(): {
       type: 'lodging',
       status: 'researched',
       budgetRole: 'pending',
-      title: 'Pendiente — hotel en El Nido, 19 al 27 nov 2026',
+      title: 'Pendiente — hotel en El Nido, 22 al 25 nov 2026',
       provider: 'Huni Lio',
       destination: 'El Nido',
-      startAt: '2026-11-19T15:00:00+08:00',
-      endAt: '2026-11-27T11:00:00+08:00',
+      startAt: '2026-11-22T15:00:00+08:00',
+      endAt: '2026-11-25T11:00:00+08:00',
       sourceUrl: HUNI,
       verificationStatus: 'unverified',
       currency: undefined,
       nextAction:
-        'Cotizar Huni Lio y Seda Lio, total con impuestos y cancelación, del 19 al 27.',
-      notes: `Ocho noches (antes diez: 17–27). Ventana recortada porque Airbnb Makati queda hasta el 19. Habitación privada con aire. Seda Lio: ${SEDA_LIO}. Sin cotización.`,
+        'Cotizar Huni Lio / Seda Lio 22–25 (3 noches), con impuestos y cancelación.',
+      notes: `Tres noches. Llegas ENI ~20:35 el 22; sales DG6257 el 25 a las 10:45. Seda Lio: ${SEDA_LIO}.`,
     }),
     row({
       id: 'filipinas-nov-2026-p-asiento',
@@ -449,24 +519,27 @@ export function filipinasNov2026Bundle(): {
   const trip: Trip = {
     id: FILIPINAS_TRIP_ID,
     title: 'Filipinas, noviembre 2026',
-    destination: 'Manila y El Nido',
-    startDate: '2026-11-14',
+    destination: 'Manila, Cebú y El Nido',
+    startDate: '2026-11-16',
     endDate: '2026-11-29',
     timezone: 'America/Mexico_City',
     goals: [
-      { id: 'filipinas-meta-noches', label: 'Manila y después El Nido' },
+      {
+        id: 'filipinas-meta-noches',
+        label: 'Manila → Cebú → El Nido → Manila',
+      },
       {
         id: 'filipinas-meta-regreso',
-        label: 'Salir de CDMX el 14 y estar de vuelta a más tardar el 29',
+        label: 'Salir de CDMX el 16 y estar de vuelta a más tardar el 29',
       },
     ],
     status: 'planned',
     notes:
-      'United HNW4J6 comprado: ida 16 nov UA822 MEX→SFO y UA809 SFO→MNL, llegada Manila 17 nov 21:10. Regreso ~28 nov (confirmar en reserva). Airbnb Kanso Makati 17–19. Cebú desde el 19; El Nido desde el 22. Perfil United: correo primario verificado ' +
+      'United HNW4J6: ida 16 nov UA822+UA809, Manila 17 nov 21:10. Kanso 17–19. Cebú 19–22 (5J 569 + Sleek Studio). El Nido 22–25 (DG6254). Regreso ENI→CEB→MNL 25 (BG8LUF); United ~28 nov. eTravel F00NKZMH64BZ OK. Correo United: ' +
       UNITED_PRIMARY_EMAIL +
-      '. Las búsquedas nuevas de este viaje se guardan en este mismo registro.',
+      '.',
     createdAt: CHECKED,
-    updatedAt: UNITED_EMAIL_CHANGE,
+    updatedAt: ETRAVEL_OK,
     syncStatus: 'synced',
   }
 
@@ -507,22 +580,22 @@ export function filipinasNov2026Bundle(): {
       id: 'filipinas-nov-2026-ck-etravel',
       tripId: FILIPINAS_TRIP_ID,
       label:
-        'eTravel F00NKZMH64BZ: llegada 17 nov 2026 UA809 MNL T3 (válido hasta 18 nov).',
+        'eTravel F00NKZMH64BZ: llegada 17 nov 2026 UA809 MNL T3 (válido hasta 18 nov). QR en Docs.',
       status: 'done',
       sortOrder: 3,
       createdAt: UNITED_EMAIL_CHANGE,
-      updatedAt: UNITED_EMAIL_CHANGE,
+      updatedAt: ETRAVEL_OK,
       syncStatus: 'synced',
     },
     {
       id: 'filipinas-nov-2026-ck-eni-shift',
       tripId: FILIPINAS_TRIP_ID,
       label:
-        'Itinerario interno: Cebú desde el 19; El Nido desde el 22 (ya no «ENI el 19»). Verificar hospedaje Cebú/El Nido en Tool4Trip cuando se editen opciones.',
-      status: 'open',
+        'Calendario interno alineado: Cebú 19–22, El Nido 22–25, Manila 25–28 (hotel 2ª vez pendiente).',
+      status: 'done',
       sortOrder: 4,
       createdAt: KANSO_CHANGE,
-      updatedAt: UNITED_EMAIL_CHANGE,
+      updatedAt: ETRAVEL_OK,
       syncStatus: 'synced',
     },
     {
@@ -565,9 +638,9 @@ export function filipinasNov2026Bundle(): {
       id: 'filipinas-nov-2026-nota',
       tripId: FILIPINAS_TRIP_ID,
       title: 'Itinerario elegido',
-      body: 'Ida United HNW4J6: 16 nov UA822 MEX→SFO; UA809 SFO→MNL, llegada Manila 17 nov 21:10. Airbnb Kanso Makati 17–19 (check-in ~23:00 ok). Cebú desde el 19. El Nido desde el 22. Regreso United ~28 nov (confirmar tramos en la reserva).',
+      body: 'Cadena: 16 nov UA822+UA809 → MNL 17 21:10 · 17–19 Kanso Makati · 19 5J 569 ZLW9UW + Sleek Studio Cebú · 22 DG6254 GWSE2U El Nido · 25 BG8LUF ENI→CEB→MNL · hotel Manila 25–28 (pendiente) · ~28 United HNW4J6. eTravel QR en Docs (F00NKZMH64BZ).',
       createdAt: CHECKED,
-      updatedAt: UNITED_EMAIL_CHANGE,
+      updatedAt: ETRAVEL_OK,
       syncStatus: 'synced',
     },
     {
@@ -589,10 +662,51 @@ export function filipinasNov2026Bundle(): {
       importedAt: CHECKED,
       optionCount: travelOptions.length,
       schemaVersion: 1,
-      revision: 4,
-      generatedAt: UNITED_EMAIL_CHANGE,
+      revision: 5,
+      generatedAt: ETRAVEL_OK,
     },
   ]
 
   return { trip, travelOptions, checklistItems, notes, packageImports }
+}
+
+/** Upsert eTravel QR into local Docs (Dexie). Cloud package v1 has no document blobs. */
+export async function ensureFilipinasEtravelQr(documents: {
+  get: (id: string) => Promise<{ id: string } | undefined>
+  save: (
+    meta: {
+      id: string
+      tripId: string
+      name: string
+      type: 'other'
+      mimeType: string
+      notes?: string
+      capturedAt?: string
+      syncStatus?: 'local' | 'synced'
+    },
+    blob: Blob,
+  ) => Promise<unknown>
+}): Promise<boolean> {
+  const existing = await documents.get(FILIPINAS_ETRAVEL_DOC_ID)
+  if (existing) return false
+  const res = await fetch(FILIPINAS_ETRAVEL_QR_URL)
+  if (!res.ok) {
+    throw new Error(`No se pudo cargar el QR eTravel (${res.status}).`)
+  }
+  const blob = await res.blob()
+  await documents.save(
+    {
+      id: FILIPINAS_ETRAVEL_DOC_ID,
+      tripId: FILIPINAS_TRIP_ID,
+      name: 'eTravel QR F00NKZMH64BZ — llegada 17 nov 2026 UA809.png',
+      type: 'other',
+      mimeType: 'image/png',
+      notes:
+        'Registro eTravel Filipinas. Llegada 17 nov 2026 · UA809 · MNL T3. Válido hasta 18 nov 2026. Ref F00NKZMH64BZ.',
+      capturedAt: ETRAVEL_OK,
+      syncStatus: 'local',
+    },
+    blob,
+  )
+  return true
 }

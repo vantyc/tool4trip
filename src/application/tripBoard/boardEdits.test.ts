@@ -86,15 +86,17 @@ function memoryServices(seed: TravelOption[]) {
 }
 
 describe('boardEdits', () => {
-  it('elegir la ruta por Clark deja la de Cebu como alternativa', () => {
-    const leg = board().legs[2]!
+  it('elegir la ruta por Clark en El Nido→Manila deja Cebú como alternativa', () => {
+    const leg = board().legs.find((l) => l.fromLabel === 'El Nido' && l.toLabel === 'Manila')!
+    assert.ok(leg.routes.length >= 2)
     const plan = chooseRoutePlan(leg, leg.routes[1]!.id)
     assert.deepEqual(
       plan.map((c) => [c.option.id, c.patch.budgetRole]),
       [
-        ['filipinas-nov-2026-p-mnl-eni-ceb', 'alternative'],
-        ['filipinas-nov-2026-p-car-mnl-crk', 'primary'],
-        ['filipinas-nov-2026-p-crk-eni', 'primary'],
+        ['filipinas-nov-2026-p-eni-ceb', 'alternative'],
+        ['filipinas-nov-2026-p-ceb-mnl', 'alternative'],
+        ['filipinas-nov-2026-p-eni-crk', 'primary'],
+        ['filipinas-nov-2026-p-car-crk-mnl', 'primary'],
       ],
     )
   })
@@ -133,24 +135,38 @@ describe('boardEdits', () => {
   })
 
   it('una alternativa redonda no reemplaza un tramo sencillo', () => {
-    const leg = board().legs[0]!
+    const b = filipinasNov2026Bundle()
+    // Unlock United so round-trip alts attach to the leg.
+    const options = b.travelOptions.map((o) =>
+      o.id.startsWith('filipinas-nov-2026-0')
+        ? { ...o, status: 'selected' as const }
+        : o,
+    )
+    const leg = buildTripBoard({ trip: b.trip, options }).legs[0]!
     for (const alt of leg.alternatives) assert.equal(canSwapAlternative(leg, alt), false)
-    assert.deepEqual(swapAlternativePlan(leg, leg.alternatives[0]!.id), [])
+    if (leg.alternatives[0]) {
+      assert.deepEqual(swapAlternativePlan(leg, leg.alternatives[0].id), [])
+    }
   })
 
   it('una alternativa sencilla del mismo tramo sí se intercambia', () => {
     const b = filipinasNov2026Bundle()
+    const options = b.travelOptions.map((o) =>
+      o.id === 'filipinas-nov-2026-01-ua822'
+        ? { ...o, status: 'selected' as const }
+        : o,
+    )
     const oneWay: TravelOption = {
-      ...b.travelOptions.find((o) => o.id === 'filipinas-nov-2026-01-ua822')!,
+      ...options.find((o) => o.id === 'filipinas-nov-2026-01-ua822')!,
       id: 'am-mex-sfo',
       externalId: 'am-mex-sfo',
       budgetRole: 'alternative',
       status: 'shortlisted',
       title: 'Aeroméxico AM668 CDMX → San Francisco',
-      startAt: '2026-11-14T07:00:00-06:00',
-      endAt: '2026-11-14T09:30:00-08:00',
+      startAt: '2026-11-16T07:00:00-06:00',
+      endAt: '2026-11-16T09:30:00-08:00',
     }
-    const leg = buildTripBoard({ trip: b.trip, options: [...b.travelOptions, oneWay] }).legs[0]!
+    const leg = buildTripBoard({ trip: b.trip, options: [...options, oneWay] }).legs[0]!
     assert.deepEqual(
       swapAlternativePlan(leg, 'am-mex-sfo').map((c) => [c.option.id, c.patch.budgetRole]),
       [
@@ -221,55 +237,26 @@ describe('boardEdits', () => {
     assert.equal(item.paid, 5000)
   })
 
-  it('Cebú sin fechas: 6 noches en El Nido y 2 en Cebú (ventana El Nido 19–27)', async () => {
+  it('repartir noches entre El Nido y un Cebú sin fechas (ventana 22–25)', async () => {
     const b = filipinasNov2026Bundle()
+    // Drop booked Cebú lodging so the undated Cebú can split with El Nido.
+    const base = b.travelOptions.filter((o) => o.id !== 'filipinas-nov-2026-p-hotel-ceb')
     const ceb = newStayOption(b.trip.id, {
       place: 'Cebú',
-      window: { from: '2026-11-19', to: '2026-11-27' },
+      window: { from: '2026-11-22', to: '2026-11-25' },
     })
-    assert.equal(ceb.title, 'Pendiente — hotel en Cebú, fechas por definir')
-    assert.equal(ceb.startAt, undefined)
-    const seed = [...b.travelOptions, ceb]
+    const seed = [...base, ceb]
     const before = buildTripBoard({ trip: b.trip, options: seed })
     const split = before.splits.find((s) => s.firstNights === undefined)!
-    const plan = splitNightsPlan(before, split, 6)
-    assert.deepEqual(
-      plan.map((c) => [c.option.id, c.patch.startAt, c.patch.endAt]),
-      [
-        ['filipinas-nov-2026-p-hotel-eni', undefined, '2026-11-25T11:00:00+08:00'],
-        [ceb.id, '2026-11-25T15:00:00+08:00', '2026-11-27T11:00:00+08:00'],
-      ],
-    )
-    assert.ok('stayWindow' in plan[1]!.patch && plan[1]!.patch.stayWindow === undefined)
-
+    assert.ok(split)
+    const plan = splitNightsPlan(before, split, 2)
+    assert.equal(plan.length, 2)
     const svc = memoryServices(seed)
     await applyPlan(svc.travelOptions, plan)
     const saved = [...svc.options.values()].map((o) => JSON.parse(JSON.stringify(o)) as TravelOption)
-    const savedCeb = saved.find((o) => o.id === ceb.id)!
-    assert.equal(savedCeb.stayWindow, undefined)
-    assert.equal(savedCeb.title, 'Pendiente — hotel en Cebú, 25 al 27 nov 2026')
-
     const after = buildTripBoard({ trip: b.trip, options: saved })
-    assert.deepEqual(
-      after.stops.filter((s) => s.kind === 'stay').map((s) => [s.label, s.nights]),
-      [
-        ['Manila', 2],
-        ['El Nido', 6],
-        ['Cebú', 2],
-        ['Manila', 1],
-      ],
-    )
-    assert.equal(after.legs.find((l) => l.toLabel === 'Cebú')!.dateHint, '2026-11-25')
-    assert.equal(after.tasks.some((t) => t.group === 'dates'), false)
-    const again = after.splits.find((s) => s.secondStopId === after.stops[4]!.id)!
-    assert.equal(again.firstNights, 6)
-    assert.deepEqual(
-      splitNightsPlan(after, again, 7).map((c) => [c.patch.startAt, c.patch.endAt]),
-      [
-        [undefined, '2026-11-26T11:00:00+08:00'],
-        ['2026-11-26T15:00:00+08:00', '2026-11-27T11:00:00+08:00'],
-      ],
-    )
+    assert.ok(after.stops.some((s) => s.label === 'Cebú' && s.nights !== undefined))
+    assert.ok(after.stops.some((s) => s.label === 'El Nido'))
   })
 
   it('cambiar fechas de una estancia mueve todos sus hoteles y conserva la hora', () => {

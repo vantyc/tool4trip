@@ -3,6 +3,10 @@ import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
 import { services } from '../../application'
 import { tripControlSheet, type TripControlSheet } from '../../../shared/quoteLedger'
 import type { Trip } from '../../domain/types'
+import {
+  FILIPINAS_TRIP_ID,
+  ensureFilipinasEtravelQr,
+} from '../../seed/filipinasNov2026'
 import { BudgetBar } from '../BudgetBar'
 import { TripControlDock } from '../TripControlDock'
 import { useCloudQuery } from '../useCloudQuery'
@@ -99,6 +103,13 @@ export function TripLayout() {
     document.addEventListener('click', closeMore)
     return () => document.removeEventListener('click', closeMore)
   }, [])
+
+  useEffect(() => {
+    if (tripId !== FILIPINAS_TRIP_ID || !online) return
+    void ensureFilipinasEtravelQr(services.documents).catch(() => {
+      /* QR is best-effort until Docs refresh; calendar/API still load. */
+    })
+  }, [tripId, online])
 
   const { data: options = [] } = useCloudQuery(
     tripId ? `trip-control:${tripId}:${location.pathname}` : null,
